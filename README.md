@@ -145,7 +145,8 @@ Transfers run in one database transaction with row locks taken in a fixed order 
 
 ## Git workflow
 
-- `main` — releasable. `develop` — integration. `feature/<name>` — one feature each, merged into `develop` with `--no-ff`.
+- Only two long-lived branches exist on the remote: `main` — releasable, and `develop` — integration.
+- All changes are committed and pushed to `develop`; `develop` is merged into `main` through a pull request once CI passes. Nothing is pushed directly to `main`.
 - Commits are small and descriptive (`feat(transfer): …`, `fix(network): …`, `docs: …`).
 - CI runs on every push/PR to `main` and `develop`.
 
