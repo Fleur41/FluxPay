@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!--
+        Security:
+        - allowBackup=false + data extraction rules: tokens and cached balances never leave the device.
+        - networkSecurityConfig: cleartext HTTP is blocked (the dev flavor overrides this for 10.0.2.2 only).
+    -->
+    <application
+        android:name=".FluxPayApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.FluxPay"
+        tools:targetApi="33">
+
+        <!--
+            Single-activity app. launchMode="singleTop": when a deep link arrives while
+            MainActivity is already on top, Android calls onNewIntent() on the existing
+            instance instead of stacking a second copy; the link is then routed through
+            the Compose NavController.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.FluxPay.Splash"
+            android:windowSoftInputMode="adjustResize">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- fluxpay://transaction/{id} -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fluxpay" android:host="transaction" />
+            </intent-filter>
+
+            <!-- fluxpay://reset-password?uid=…&token=… (from the password reset email) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fluxpay" android:host="reset-password" />
+            </intent-filter>
+
+            <!-- Verified App Links: https://fluxpay.app/transaction/… and /reset-password -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="fluxpay.app" />
+                <data android:pathPrefix="/transaction/" />
+                <data android:path="/reset-password" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

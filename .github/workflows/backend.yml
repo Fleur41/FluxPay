@@ -1,0 +1,42 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: fluxpay
+          POSTGRES_USER: fluxpay
+          POSTGRES_PASSWORD: fluxpay
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fluxpay"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://fluxpay:fluxpay@localhost:5432/fluxpay
+      DJANGO_SECRET_KEY: ci-only-secret-key-that-is-long-enough-for-hs256-signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Migrations are up to date
+        run: python manage.py makemigrations --check --dry-run
+      - name: Tests (PostgreSQL)
+        run: python manage.py test --verbosity 2
