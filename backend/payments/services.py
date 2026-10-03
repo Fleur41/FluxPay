@@ -43,6 +43,8 @@ FAILABLE = {
     Direction.OUT: {Status.HELD, Status.SUBMITTED},
 }
 SUBMITTABLE = {Direction.IN: Status.CREATED, Direction.OUT: Status.HELD}
+# Currencies each rail settles in. A rail missing here (the fake one) accepts any wallet.
+RAIL_CURRENCIES = {Rail.MPESA: {"KES"}, Rail.PAYPAL: {"USD"}, Rail.BANK: {"KES"}}
 AFTER_SUBMIT = {Direction.IN: Status.PENDING, Direction.OUT: Status.SUBMITTED}
 
 
@@ -94,6 +96,7 @@ def start_deposit(*, user, account_id, rail: str, method: str, amount: Decimal, 
     account = Account.objects.filter(id=account_id, owner=user, is_active=True, system_key__isnull=True).first()
     if account is None:
         raise BusinessError("Account not found.", "account_not_found", status.HTTP_404_NOT_FOUND)
+    _require_currency(rail, account.currency)
 
     try:
         with db_transaction.atomic():
@@ -129,6 +132,7 @@ def start_payout(*, user, account_id, rail: str, method: str, amount: Decimal, i
     wallet = Account.objects.filter(id=account_id, owner=user, is_active=True, system_key__isnull=True).first()
     if wallet is None:
         raise BusinessError("Account not found.", "account_not_found", status.HTTP_404_NOT_FOUND)
+    _require_currency(rail, wallet.currency)
     clearing = clearing_account(rail, wallet.currency)
 
     try:
@@ -289,9 +293,12 @@ def expire_payment(payment_id) -> ExternalPayment:
 def expire_if_abandoned(payment_id) -> ExternalPayment:
     """For an old deposit: settles it if the provider has an outcome, expires it if still pending.
 
-    UNKNOWN leaves it alone; the next run asks again.
+    UNKNOWN leaves it alone; the next run asks again. A deposit that never got a provider reference
+    has nothing to ask about, so it expires straight away.
     """
     payment = ExternalPayment.objects.get(id=payment_id)
+    if payment.status == Status.CREATED and not payment.provider_ref:
+        return expire_payment(payment.id)
     result = get_provider(payment.rail).fetch_status(payment)
     if result.state == ProviderState.PENDING:
         return expire_payment(payment.id)
@@ -340,6 +347,11 @@ def process_webhook(event_id) -> WebhookEvent:
     if payment is None:
         raise PaymentNotFound(callback.provider_ref)
 
+    if callback.details:
+        with db_transaction.atomic():
+            locked = _lock_payment(payment.id)
+            locked.metadata = {**locked.metadata, **callback.details}
+            locked.save(update_fields=["metadata", "updated_at"])
     settle_from_status(payment.id, provider.fetch_status(payment))
     event.payment = payment
     event.processed_at = timezone.now()
@@ -365,6 +377,15 @@ def _require_provider(rail: str) -> None:
         get_provider(rail)
     except LookupError:
         raise BusinessError("This payment method isn't available.", "rail_unavailable") from None
+
+
+def _require_currency(rail: str, currency: str) -> None:
+    allowed = RAIL_CURRENCIES.get(rail)
+    if allowed is not None and currency not in allowed:
+        raise BusinessError(
+            f"{Rail(rail).label} works with {', '.join(sorted(allowed))} wallets, not {currency}.",
+            "currency_not_supported",
+        )
 
 
 def _queue_submit(payment: ExternalPayment) -> None:
