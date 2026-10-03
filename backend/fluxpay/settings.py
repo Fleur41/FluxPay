@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     # Local
     "users",
     "banking",
+    "payments",
 ]
 
 MIDDLEWARE = [
@@ -149,6 +150,29 @@ FLUXPAY_DEFAULT_CURRENCY = os.environ.get("FLUXPAY_DEFAULT_CURRENCY", "KES")
 # Demo money credited to every new wallet so transfers can be tried out. Keep 0 in production.
 FLUXPAY_SIGNUP_BONUS = Decimal(os.environ.get("FLUXPAY_SIGNUP_BONUS", "10000.00" if DEBUG else "0"))
 FLUXPAY_MAX_TRANSFER = Decimal(os.environ.get("FLUXPAY_MAX_TRANSFER", "500000.00"))
+
+# External payments (payments app)
+# Rail -> provider adapter. The fake provider settles without real money, so it only exists in DEBUG.
+FLUXPAY_PAYMENT_PROVIDERS = {}
+if DEBUG:
+    FLUXPAY_PAYMENT_PROVIDERS["FAKE"] = "payments.providers.fake.FakeProvider"
+# Secret path segment in every callback URL (/hooks/<rail>/<token>/). Empty disables all callbacks.
+FLUXPAY_WEBHOOK_TOKEN = os.environ.get("FLUXPAY_WEBHOOK_TOKEN", "dev-webhook-token" if DEBUG else "")
+FLUXPAY_STATUS_CHECK_AFTER_SECONDS = int(os.environ.get("FLUXPAY_STATUS_CHECK_AFTER_SECONDS", "120"))
+FLUXPAY_DEPOSIT_EXPIRY_MINUTES = int(os.environ.get("FLUXPAY_DEPOSIT_EXPIRY_MINUTES", "30"))
+FLUXPAY_WEBHOOK_MATCH_RETRIES = 5
+
+# Celery (background payment work). Without a broker, tasks run inline in the web process,
+# which keeps `manage.py runserver` working with no Redis; scheduled jobs then don't run.
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "")
+CELERY_TASK_ALWAYS_EAGER = not CELERY_BROKER_URL
+CELERY_TASK_ACKS_LATE = True  # a job is re-run if its worker dies mid-way; every task is idempotent
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "resolve-stuck-payments": {"task": "payments.tasks.resolve_stuck_payments", "schedule": 300.0},
+    "expire-abandoned-deposits": {"task": "payments.tasks.expire_abandoned_deposits", "schedule": 900.0},
+}
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

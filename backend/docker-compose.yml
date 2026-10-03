@@ -1,4 +1,4 @@
-# Local stack: PostgreSQL + Django API on http://localhost:8000
+# Local stack: PostgreSQL + Redis + Django API on http://localhost:8000 + payments worker
 # (reachable from the Android emulator at http://10.0.2.2:8000)
 services:
   db:
@@ -16,16 +16,35 @@ services:
       interval: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
   api:
     build: .
     env_file: .env
-    environment:
+    environment: &app-env
       DATABASE_URL: postgres://fluxpay:fluxpay@db:5432/fluxpay
+      CELERY_BROKER_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
-    depends_on:
+    depends_on: &app-deps
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Runs payment jobs, plus the scheduler (-B) for status checks and expiry.
+  # -B is fine for one local worker; production runs a separate single `celery beat`.
+  worker:
+    build: .
+    env_file: .env
+    environment: *app-env
+    command: celery -A fluxpay worker -B -l info --concurrency 2
+    depends_on: *app-deps
 
 volumes:
   pgdata:
