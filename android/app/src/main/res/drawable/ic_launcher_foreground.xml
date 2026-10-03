@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FluxPay mark: a forward-leaning "F" whose arms taper like motion lines. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,33 L51,33 L51,75 L41,75 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,33 L73,33 L69,43 L41,43 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,50 L65,50 L61,59 L41,59 Z" />
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M58,66 L71,66 L68,72 L55,72 Z" />
+</vector>
