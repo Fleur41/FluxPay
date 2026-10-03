@@ -31,6 +31,7 @@ class StatusResult:
 class Callback:
     event_id: str  # the provider's id for this notification; used to drop replays
     provider_ref: str  # finds the payment the notification is about
+    details: dict = field(default_factory=dict)  # safe extras kept on the payment, e.g. a receipt number
 
 
 class ProviderError(Exception):

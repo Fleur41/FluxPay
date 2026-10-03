@@ -1,12 +1,14 @@
 import threading
 from contextlib import nullcontext
+from datetime import timedelta
 from decimal import Decimal
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from banking.models import Account, Transaction
@@ -14,7 +16,7 @@ from banking.services import open_wallet
 from fluxpay.celery import app as celery_app
 from fluxpay.exceptions import BusinessError
 
-from . import services
+from . import services, tasks
 from .models import ExternalPayment, WebhookEvent
 from .providers.base import ProviderState, StatusResult
 
@@ -370,3 +372,50 @@ class ConcurrencyTests(PaymentTestMixin, TransactionTestCase):
         self.assertEqual(errors, [])
         self.assertEqual(self.balance(self.wallet), Decimal("1500.00"))
         self.assertEqual(Transaction.objects.filter(reference=payment.reference).count(), 2)
+
+
+@payment_settings
+class SchedulerTests(PaymentTestMixin, TestCase):
+    def setUp(self):
+        self.user, self.wallet = self.make_user()
+
+    def make_old(self, payment):
+        old = timezone.now() - timedelta(hours=2)
+        ExternalPayment.objects.filter(id=payment.id).update(updated_at=old, created_at=old)
+
+    def test_unsubmitted_deposit_expires_without_asking_the_provider(self):
+        payment, _ = services.start_deposit(  # on_commit work is not run: never submitted
+            user=self.user,
+            account_id=self.wallet.id,
+            rail="FAKE",
+            method=ExternalPayment.Method.FAKE_IN,
+            amount=Decimal("10.00"),
+            idempotency_key="never-sent-1",
+        )
+        with mock.patch("payments.providers.fake.FakeProvider.fetch_status") as fetch_status:
+            payment = services.expire_if_abandoned(payment.id)
+        fetch_status.assert_not_called()
+        self.assertEqual(payment.status, Status.EXPIRED)
+
+    def test_stuck_job_resubmits_held_payouts_but_never_deposits(self):
+        deposit, _ = services.start_deposit(
+            user=self.user,
+            account_id=self.wallet.id,
+            rail="FAKE",
+            method=ExternalPayment.Method.FAKE_IN,
+            amount=Decimal("10.00"),
+            idempotency_key="stuck-dep-1",
+        )
+        payout, _ = services.start_payout(
+            user=self.user,
+            account_id=self.wallet.id,
+            rail="FAKE",
+            method=ExternalPayment.Method.FAKE_OUT,
+            amount=Decimal("10.00"),
+            idempotency_key="stuck-out-1",
+        )
+        self.make_old(deposit)
+        self.make_old(payout)
+        with mock.patch("payments.tasks.submit_payment_task.delay") as submit:
+            tasks.resolve_stuck_payments()
+        submit.assert_called_once_with(str(payout.id))

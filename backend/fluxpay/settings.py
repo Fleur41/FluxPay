@@ -124,7 +124,7 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {"anon": "30/min", "user": "300/min", "transfers": "20/min"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "30/min", "user": "300/min", "transfers": "20/min", "deposits": "10/min"},
     "EXCEPTION_HANDLER": "fluxpay.exceptions.api_exception_handler",
 }
 
@@ -161,6 +161,19 @@ FLUXPAY_WEBHOOK_TOKEN = os.environ.get("FLUXPAY_WEBHOOK_TOKEN", "dev-webhook-tok
 FLUXPAY_STATUS_CHECK_AFTER_SECONDS = int(os.environ.get("FLUXPAY_STATUS_CHECK_AFTER_SECONDS", "120"))
 FLUXPAY_DEPOSIT_EXPIRY_MINUTES = int(os.environ.get("FLUXPAY_DEPOSIT_EXPIRY_MINUTES", "30"))
 FLUXPAY_WEBHOOK_MATCH_RETRIES = 5
+# Public HTTPS address providers call back to (in dev, the tunnel URL), e.g. https://abc.trycloudflare.com
+FLUXPAY_PUBLIC_URL = os.environ.get("FLUXPAY_PUBLIC_URL", "")
+
+# M-Pesa (Safaricom Daraja). Enabled once consumer key, secret, passkey and the public URL are set.
+MPESA_ENV = os.environ.get("MPESA_ENV", "sandbox")
+if MPESA_ENV not in {"sandbox", "production"}:
+    raise RuntimeError("MPESA_ENV must be 'sandbox' or 'production'")
+MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
+MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")  # Daraja's sandbox test Paybill
+MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
+if all((MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_PASSKEY, FLUXPAY_PUBLIC_URL)):
+    FLUXPAY_PAYMENT_PROVIDERS["MPESA"] = "payments.providers.mpesa.MpesaProvider"
 
 # Celery (background payment work). Without a broker, tasks run inline in the web process,
 # which keeps `manage.py runserver` working with no Redis; scheduled jobs then don't run.

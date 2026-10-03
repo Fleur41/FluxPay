@@ -53,8 +53,10 @@ def resolve_stuck_payments():
     """Catches payments a lost job or a missing callback left behind."""
     cutoff = timezone.now() - timedelta(seconds=settings.FLUXPAY_STATUS_CHECK_AFTER_SECONDS)
     stuck = ExternalPayment.objects.filter(updated_at__lt=cutoff)
-    # Never got a provider reference: submit again (payouts are idempotent on our reference).
-    for payment_id in stuck.filter(status__in=[Status.CREATED, Status.HELD]).values_list("id", flat=True)[:BATCH]:
+    # A held payout that never reached the provider: submit again (payouts are idempotent on our reference).
+    # Deposits are not resubmitted: for M-Pesa that would send the customer a fresh PIN prompt every run.
+    # An unsubmitted deposit expires instead (expire_abandoned_deposits).
+    for payment_id in stuck.filter(status=Status.HELD).values_list("id", flat=True)[:BATCH]:
         submit_payment_task.delay(str(payment_id))
     for payment_id in stuck.filter(status__in=[Status.PENDING, Status.SUBMITTED]).values_list("id", flat=True)[:BATCH]:
         check_payment_task.delay(str(payment_id))
