@@ -16,8 +16,8 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseKeystore = keystorePropertiesFile.exists()
 
-// API hosts can be overridden without editing code: ./gradlew -Pfluxpay.stagingUrl=https://...
-fun apiUrl(property: String, default: String): String =
+// API hosts and version can be overridden without editing code: ./gradlew -Pfluxpay.stagingUrl=https://...
+fun propertyOr(property: String, default: String): String =
     (project.findProperty(property) as String?)?.takeIf { it.isNotBlank() } ?: default
 
 android {
@@ -28,8 +28,9 @@ android {
         applicationId = "com.fluxpay.app"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0.0"
+        // The release workflow sets these from the git tag: -Pfluxpay.versionCode=10001 -Pfluxpay.versionName=1.0.1
+        versionCode = propertyOr("fluxpay.versionCode", "1").toInt()
+        versionName = propertyOr("fluxpay.versionName", "1.0.0")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
@@ -52,7 +53,7 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             // 10.0.2.2 is your computer's localhost as seen from the Android emulator.
-            buildConfigField("String", "BASE_URL", "\"${apiUrl("fluxpay.devUrl", "http://10.0.2.2:8000/")}\"")
+            buildConfigField("String", "BASE_URL", "\"${propertyOr("fluxpay.devUrl", "http://10.0.2.2:8000/")}\"")
             buildConfigField("boolean", "ENABLE_LOGGING", "true")
             buildConfigField("boolean", "SECURE_SCREEN", "false")
             resValue("string", "app_name", "FluxPay Dev")
@@ -61,14 +62,14 @@ android {
             dimension = "environment"
             applicationIdSuffix = ".staging"
             versionNameSuffix = "-staging"
-            buildConfigField("String", "BASE_URL", "\"${apiUrl("fluxpay.stagingUrl", "https://staging-api.fluxpay.app/")}\"")
+            buildConfigField("String", "BASE_URL", "\"${propertyOr("fluxpay.stagingUrl", "https://staging-api.fluxpay.app/")}\"")
             buildConfigField("boolean", "ENABLE_LOGGING", "true")
             buildConfigField("boolean", "SECURE_SCREEN", "true")
             resValue("string", "app_name", "FluxPay Staging")
         }
         create("prod") {
             dimension = "environment"
-            buildConfigField("String", "BASE_URL", "\"${apiUrl("fluxpay.prodUrl", "https://api.fluxpay.app/")}\"")
+            buildConfigField("String", "BASE_URL", "\"${propertyOr("fluxpay.prodUrl", "https://api.fluxpay.app/")}\"")
             buildConfigField("boolean", "ENABLE_LOGGING", "false")
             buildConfigField("boolean", "SECURE_SCREEN", "true")
             resValue("string", "app_name", "FluxPay")

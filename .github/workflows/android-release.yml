@@ -1,0 +1,91 @@
+name: Android Release
+
+# Push a version tag on main to publish a signed prod build:
+#   git tag v1.0.1 && git push origin v1.0.1
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # create the GitHub Release
+
+concurrency:
+  group: android-release-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must be on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME is not on main. Merge develop into main first."; exit 1; }
+
+      - name: Version from tag
+        id: version
+        run: |
+          name="${GITHUB_REF_NAME#v}"
+          [[ "$name" =~ ^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}$ ]] \
+            || { echo "::error::Tag must look like v1.2.3 (minor/patch < 100), got $GITHUB_REF_NAME"; exit 1; }
+          IFS=. read -r major minor patch <<< "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$((major * 10000 + minor * 100 + patch))" >> "$GITHUB_OUTPUT"
+
+      - name: Release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Without these the build silently falls back to the debug key, which must never ship.
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!v}" ] || { echo "::error::Missing secret ANDROID_$v"; exit 1; }
+          done
+          echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          cat > keystore.properties <<EOF
+          storeFile=release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest testDevDebugUnitTest --stacktrace
+
+      - name: Build signed prod APK and AAB
+        run: >
+          ./gradlew assembleProdRelease bundleProdRelease --stacktrace
+          -Pfluxpay.versionName=${{ steps.version.outputs.name }}
+          -Pfluxpay.versionCode=${{ steps.version.outputs.code }}
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/prod/release/*.apk "dist/fluxpay-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/bundle/prodRelease/*.aab "dist/fluxpay-${GITHUB_REF_NAME}.aab"
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: android/dist/*
+          generate_release_notes: true
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f release.jks keystore.properties

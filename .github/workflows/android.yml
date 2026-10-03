@@ -7,6 +7,13 @@ on:
   pull_request:
     paths: ["android/**", ".github/workflows/android.yml"]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
