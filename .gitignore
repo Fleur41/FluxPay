@@ -1,0 +1,46 @@
+# ---------- Android / Gradle ----------
+.gradle/
+build/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Signing material — never commit
+*.jks
+*.keystore
+keystore.properties
+
+# Firebase / Google services config
+google-services.json
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/
+
+# ---------- Python / Django ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+*.sqlite3
+db.sqlite3
+staticfiles/
+media/
+.pytest_cache/
+.coverage
+htmlcov/
