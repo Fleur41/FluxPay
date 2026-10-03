@@ -192,6 +192,30 @@ class MpesaDepositTests(PaymentTestMixin, APITestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.status, Status.CREATED)
 
+    def test_invalid_access_token_retries_instead_of_failing(self, post, get):
+        # The exact response Daraja's sandbox gave in live testing (HTTP 404).
+        post.return_value = http(
+            404, {"requestId": "", "errorCode": "404.001.03", "errorMessage": "Invalid Access Token"}
+        )
+        payment, _ = services.start_deposit(  # on_commit work is not run here
+            user=self.user,
+            account_id=self.wallet.id,
+            rail="MPESA",
+            method=ExternalPayment.Method.STK,
+            amount=Decimal("1"),
+            idempotency_key="bad-token-001",
+            metadata={"phone_number": "254712345678"},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            services.submit_payment(payment.id)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Status.CREATED)  # kept for the retry, not failed
+
+        post.return_value = STK_ACCEPTED
+        payment = services.submit_payment(payment.id)
+        self.assertEqual(payment.status, Status.PENDING)
+        self.assertEqual(get.call_count, 2)  # the rejected token was dropped and a new one fetched
+
     def test_access_token_is_reused(self, post, get):
         post.return_value = STK_ACCEPTED
         self.request_deposit(key="mpesa-key-001")
