@@ -30,6 +30,8 @@ NAIROBI = ZoneInfo("Africa/Nairobi")  # Daraja timestamps are in Kenyan time
 TIMEOUT = (5, 30)  # connect, read (seconds)
 # STK Push Query answers this while the customer has not responded yet.
 STILL_PROCESSING = "500.001.1001"
+# Daraja answers this (HTTP 404) for an expired token, or one from an app without access to the API.
+INVALID_TOKEN = "404.001.03"
 TOKEN_CACHE_KEY = "payments:mpesa:access-token"
 
 
@@ -129,8 +131,11 @@ class MpesaProvider(PaymentProvider):
             data = response.json()
         except ValueError:
             data = {}
-        if response.status_code == 401:
-            cache.delete(TOKEN_CACHE_KEY)  # an expired or revoked token; the retry fetches a new one
+        if response.status_code == 401 or data.get("errorCode") == INVALID_TOKEN:
+            # Our credentials problem, not the customer's: drop the token and retry with a fresh one.
+            # If it keeps happening, the Daraja app is likely not enabled for this API (e.g. M-Pesa Express).
+            cache.delete(TOKEN_CACHE_KEY)
+            logger.warning("Daraja rejected the access token on %s: %s", path, data)
             raise ProviderUnavailable("Daraja rejected the access token.")
         if response.status_code >= 500 and data.get("errorCode") != STILL_PROCESSING:
             raise ProviderUnavailable(f"Daraja error {response.status_code}: {data.get('errorMessage', '')}")
