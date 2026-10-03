@@ -148,7 +148,34 @@ Transfers run in one database transaction with row locks taken in a fixed order 
 - Only two long-lived branches exist on the remote: `main` — releasable, and `develop` — integration.
 - All changes are committed and pushed to `develop`; `develop` is merged into `main` through a pull request once CI passes. Nothing is pushed directly to `main`.
 - Commits are small and descriptive (`feat(transfer): …`, `fix(network): …`, `docs: …`).
-- CI runs on every push/PR to `main` and `develop`.
+
+## CI/CD
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| `backend.yml` | push/PR to `main`/`develop`, `v*` tags | migrations check, `check --deploy`, tests on PostgreSQL, Docker build. Publishes `ghcr.io/fleur41/fluxpay-api` from `main` (`latest`, `sha-…`) and tags (`1.2.3`, `1.2`) |
+| `android.yml` | push/PR to `main`/`develop` | unit tests, dev debug APK, prod release build (debug-signed) |
+| `android-release.yml` | `v*.*.*` tags on `main` | unit tests, signed prod APK + AAB, GitHub Release with checksums |
+
+Releasing: merge `develop` into `main` through a PR, then tag the merge commit on `main`:
+
+```bash
+git checkout main && git pull
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+The tag sets `versionName` (`1.0.1`) and `versionCode` (`major*10000 + minor*100 + patch` = `10001`).
+
+The release workflow needs these repository secrets (Settings → Secrets and variables → Actions) and fails rather than ship a debug-signed build without them:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -i android/fluxpay-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias (`fluxpay`) |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+Pull the API image with `docker pull ghcr.io/fleur41/fluxpay-api:latest`. The package is private by default; make it public or `docker login ghcr.io` with a token that has `read:packages`.
 
 ## Upgrading dependency versions
 
