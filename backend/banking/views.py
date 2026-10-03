@@ -30,7 +30,11 @@ class AccountLookupView(APIView):
 
     def get(self, request):
         number = request.query_params.get("account_number", "")
-        account = Account.objects.select_related("owner").filter(account_number=number, is_active=True).first()
+        account = (
+            Account.objects.select_related("owner")
+            .filter(account_number=number, is_active=True, system_key__isnull=True)
+            .first()
+        )
         if account is None:
             raise BusinessError("No active account with that number.", "recipient_not_found", status.HTTP_404_NOT_FOUND)
         return Response(AccountLookupSerializer(account).data)

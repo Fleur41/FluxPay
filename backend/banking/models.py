@@ -28,21 +28,34 @@ class Account(models.Model):
         max_digits=14, decimal_places=2, default=Decimal("0.00"), validators=[MinValueValidator(Decimal("0.00"))]
     )
     is_active = models.BooleanField(default=True)
+    # Set only on FluxPay's own clearing accounts (e.g. "clearing:MPESA:KES"); never on customer wallets.
+    system_key = models.CharField(max_length=40, unique=True, null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("created_at",)
         constraints = [
-            models.CheckConstraint(condition=models.Q(balance__gte=0), name="account_balance_non_negative"),
+            # Clearing accounts mirror money held at a provider, so they go negative as deposits come in.
+            models.CheckConstraint(
+                condition=models.Q(balance__gte=0) | models.Q(system_key__isnull=False),
+                name="account_balance_non_negative",
+            ),
         ]
 
     def __str__(self) -> str:
         return f"{self.account_number} ({self.currency}) - {self.owner}"
 
+    @property
+    def is_system(self) -> bool:
+        return self.system_key is not None
+
 
 class Transaction(models.Model):
-    """One ledger line on one account. A transfer produces two: a DEBIT and a CREDIT."""
+    """One ledger line on one account. A transfer produces two: a DEBIT and a CREDIT.
+
+    External payments post their two lines against a clearing account and share the payment's reference.
+    """
 
     class Type(models.TextChoices):
         CREDIT = "CREDIT", "Credit"
@@ -53,6 +66,8 @@ class Transaction(models.Model):
         TRANSFER_OUT = "TRANSFER_OUT", "Transfer sent"
         BONUS = "BONUS", "Bonus"
         DEPOSIT = "DEPOSIT", "Deposit"
+        WITHDRAWAL = "WITHDRAWAL", "Withdrawal"
+        WITHDRAWAL_REVERSAL = "WITHDRAWAL_REVERSAL", "Withdrawal returned"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"

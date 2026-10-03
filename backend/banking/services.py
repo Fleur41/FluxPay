@@ -49,7 +49,9 @@ def transfer_funds(*, user, source_id, destination_number: str, amount: Decimal,
     try:
         with db_transaction.atomic():
             # Lock both rows in a fixed order (by primary key) so two opposite transfers can't deadlock.
-            destination_ref = Account.objects.filter(account_number=destination_number, is_active=True).first()
+            destination_ref = Account.objects.filter(
+                account_number=destination_number, is_active=True, system_key__isnull=True
+            ).first()
             if destination_ref is None:
                 raise BusinessError("No active account with that number.", "recipient_not_found", status.HTTP_404_NOT_FOUND)
             ids = sorted({str(source_id), str(destination_ref.id)})
