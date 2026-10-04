@@ -93,8 +93,8 @@ class LimitTests(APITestCase):
                        amount=Decimal("2000.00"), note="", idempotency_key="fund-org-1")
         membership = Membership.objects.get(organization=org, user=self.alice)
         with self.assertRaises(BusinessError) as ctx:
-            org_services.create_payment_request(
-                membership=membership, source_account_id=org.accounts.get().id,
+            org_services.create_payment(
+                membership=membership, type="SUPPLIER",
                 destination_account_number=self.b_acc.account_number, amount=Decimal("5.00"), note="",
                 idempotency_key="org-small-1",
             )

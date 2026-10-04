@@ -12,7 +12,7 @@ from banking.serializers import AccountSerializer, TransactionSerializer
 from banking.views import statement_response
 
 from . import services
-from .models import Invitation, Membership, PaymentRequest
+from .models import Invitation, Membership, Payment
 from .roles import Perm
 from .serializers import (
     AcceptInvitationSerializer,
@@ -24,8 +24,9 @@ from .serializers import (
     OrganizationCreateSerializer,
     OrganizationSerializer,
     OrganizationUpdateSerializer,
-    PaymentRequestCreateSerializer,
-    PaymentRequestSerializer,
+    PaymentCreateSerializer,
+    PaymentSerializer,
+    ReverseSerializer,
     RoleSerializer,
 )
 
@@ -162,8 +163,13 @@ class OrgTransactionListView(OrgScopedMixin, generics.ListAPIView):
         )
 
 
-class PaymentRequestListCreateView(OrgScopedMixin, generics.ListAPIView):
-    serializer_class = PaymentRequestSerializer
+class PaymentListCreateView(OrgScopedMixin, generics.ListAPIView):
+    """GET/POST /organizations/<id>/payments/ — every payment out of the cashbook, pay-run payslips included.
+
+    Filters: ?status=, ?type=, ?worker=<worker id>, ?pay_run=<run id> or ?pay_run=none for payments made on their own.
+    """
+
+    serializer_class = PaymentSerializer
     throttle_classes = (ScopedRateThrottle,)
     throttle_scope = "transfers"
 
@@ -171,42 +177,61 @@ class PaymentRequestListCreateView(OrgScopedMixin, generics.ListAPIView):
         return Perm.INITIATE_PAYMENT if request.method == "POST" else Perm.VIEW
 
     def get_queryset(self):
-        requests = PaymentRequest.objects.select_related(
-            "source_account", "created_by", "decided_by", "transfer"
+        payments = Payment.objects.select_related(
+            "source_account", "created_by", "decided_by", "reversal"
         ).filter(organization_id=self.membership.organization_id)
-        wanted = self.request.query_params.get("status")
-        return requests.filter(status=wanted) if wanted else requests
+        params = self.request.query_params
+        for field in ("status", "type"):
+            if params.get(field):
+                payments = payments.filter(**{field: params[field]})
+        if params.get("worker"):
+            payments = payments.filter(worker_id=params["worker"])
+        if params.get("pay_run") == "none":
+            payments = payments.filter(pay_run__isnull=True)
+        elif params.get("pay_run"):
+            payments = payments.filter(pay_run_id=params["pay_run"])
+        return payments
 
     def post(self, request, org_id):
-        serializer = PaymentRequestCreateSerializer(data=request.data)
+        serializer = PaymentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        payment, created = services.create_payment_request(membership=self.membership, **serializer.validated_data)
+        payment, created = services.create_payment(membership=self.membership, **serializer.validated_data)
         return Response(
-            PaymentRequestSerializer(payment).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            PaymentSerializer(payment).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
         )
 
 
-class PaymentRequestDecisionView(OrgScopedMixin, APIView):
-    """POST .../payment-requests/<id>/{approve,reject,cancel}/"""
+class PaymentActionView(OrgScopedMixin, APIView):
+    """POST .../payments/<id>/{approve,reject,cancel,reverse}/"""
 
     actions = {
-        "approve": (Perm.APPROVE_PAYMENT, services.approve_payment_request),
-        "reject": (Perm.APPROVE_PAYMENT, services.reject_payment_request),
-        "cancel": (Perm.INITIATE_PAYMENT, services.cancel_payment_request),
+        "approve": Perm.APPROVE_PAYMENT,
+        "reject": Perm.APPROVE_PAYMENT,
+        "cancel": Perm.INITIATE_PAYMENT,
+        "reverse": Perm.APPROVE_PAYMENT,
     }
 
     def perm_for(self, request):
-        if self.kwargs["decision"] not in self.actions:
+        if self.kwargs["action"] not in self.actions:
             raise Http404
-        return self.actions[self.kwargs["decision"]][0]
+        return self.actions[self.kwargs["action"]]
 
-    def post(self, request, org_id, request_id, decision):
+    def post(self, request, org_id, payment_id, action):
+        if action == "reverse":
+            serializer = ReverseSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            payment = services.reverse_payment(
+                membership=self.membership, payment_id=payment_id, reason=serializer.validated_data["reason"]
+            )
+            return Response(PaymentSerializer(payment).data)
         serializer = DecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        _perm, action = self.actions[decision]
-        kwargs = {"note": serializer.validated_data["note"]} if decision != "cancel" else {}
-        payment = action(membership=self.membership, request_id=request_id, **kwargs)
-        return Response(PaymentRequestSerializer(payment).data)
+        if action == "cancel":
+            payment = services.cancel_payment(membership=self.membership, payment_id=payment_id)
+        else:
+            decide = services.approve_payment if action == "approve" else services.reject_payment
+            payment = decide(membership=self.membership, payment_id=payment_id, note=serializer.validated_data["note"])
+        return Response(PaymentSerializer(payment).data)
 
 
 class OrgAuditEventListView(OrgScopedMixin, generics.ListAPIView):

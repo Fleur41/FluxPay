@@ -35,7 +35,11 @@ CHART = {
     "sales": ("4000", "Sales and revenue", T.INCOME, "Money customers paid the business."),
     "other_income": ("4900", "Other income", T.INCOME, ""),
     "salaries": ("5000", "Salaries and wages", T.EXPENSE, "Pay to workers, through FluxPay payroll."),
+    "allowances": ("5001", "Allowances", T.EXPENSE, "Transport, housing and other allowances paid to workers."),
+    "bonuses": ("5002", "Bonuses", T.EXPENSE, "Bonuses paid to workers."),
+    "commissions": ("5003", "Commissions", T.EXPENSE, "Commissions paid to workers."),
     "suppliers": ("5100", "Purchases and suppliers", T.EXPENSE, "Stock, materials and supplier payments."),
+    "contractors": ("5101", "Contractors", T.EXPENSE, "Payments to contractors and freelancers."),
     "expenses": ("5900", "Other business expenses", T.EXPENSE, "Rent, transport, utilities and other costs."),
 }
 # What a movement is booked to unless someone chooses otherwise.
@@ -178,6 +182,31 @@ def on_transfer(transfer, source, destination, *, out_role: str | None = None) -
             reference=transfer.reference, counterparty=holder_name(source), counterparty_account=source.account_number,
             description=transfer.note or f"Received from {holder_name(source)}",
             role=_incoming_role(destination.organization_id, source),
+        )  # fmt: skip
+
+
+def on_payment_reversal(reversal, *, payer, payee, payer_role: str, source: str = Source.REVERSAL) -> None:
+    """Books a business taking back one of its payments (`reversal.reverses`).
+
+    Each business side is booked against the category its original entry is filed under now, so the
+    expense (or, for a business payee, the income) shrinks. `payer_role` is used if the payment was never
+    booked on its own line (pay runs paid before payslips had their own lines)."""
+    from banking.services import holder_name
+
+    original = reversal.reverses.reference
+    for wallet, direction, other in ((payer, "IN", payee), (payee, "OUT", payer)):
+        if not wallet.organization_id:
+            continue
+        booked = (
+            BusinessEntry.objects.filter(wallet=wallet, reference=original).exclude(direction=direction)
+            .select_related("category").first()
+        )
+        fallback = payer_role if wallet is payer else _incoming_role(wallet.organization_id, other)
+        record_movement(
+            wallet=wallet, direction=direction, amount=reversal.amount, source=source, reference=reversal.reference,
+            counterparty=holder_name(other), counterparty_account=other.account_number, description=reversal.note,
+            role=None if booked else fallback, category_account=booked.category if booked else None,
+            actor=reversal.initiated_by,
         )  # fmt: skip
 
 

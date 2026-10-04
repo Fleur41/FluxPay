@@ -11,6 +11,7 @@ import com.fluxpay.core.data.datastore.SecureTokenStore
 import com.fluxpay.core.data.repository.AccountRepositoryImpl
 import com.fluxpay.core.data.repository.AuthRepositoryImpl
 import com.fluxpay.core.data.repository.BudgetRepositoryImpl
+import com.fluxpay.core.data.repository.BusinessRepositoryImpl
 import com.fluxpay.core.data.repository.ConfigRepositoryImpl
 import com.fluxpay.core.data.repository.NotificationSettingsRepositoryImpl
 import com.fluxpay.core.data.repository.StatementRepositoryImpl
@@ -18,6 +19,7 @@ import com.fluxpay.core.data.repository.TransactionRepositoryImpl
 import com.fluxpay.core.data.repository.TransferRepositoryImpl
 import com.fluxpay.core.domain.repository.AccountRepository
 import com.fluxpay.core.domain.repository.AuthRepository
+import com.fluxpay.core.domain.repository.BusinessRepository
 import com.fluxpay.core.domain.repository.BudgetRepository
 import com.fluxpay.core.domain.repository.ConfigRepository
 import com.fluxpay.core.domain.repository.NotificationSettingsRepository
@@ -51,6 +53,7 @@ annotation class ConfigDataStore
 abstract class DataModule {
     @Binds abstract fun bindTokenStore(impl: SecureTokenStore): AuthTokenStore
     @Binds abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
+    @Binds abstract fun bindBusinessRepository(impl: BusinessRepositoryImpl): BusinessRepository
     @Binds abstract fun bindAccountRepository(impl: AccountRepositoryImpl): AccountRepository
     @Binds abstract fun bindTransactionRepository(impl: TransactionRepositoryImpl): TransactionRepository
     @Binds abstract fun bindTransferRepository(impl: TransferRepositoryImpl): TransferRepository

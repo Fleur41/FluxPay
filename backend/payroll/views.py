@@ -15,12 +15,13 @@ from accounting.models import BusinessEntry, LedgerAccount
 from accounting.services import business_date
 from banking.models import Account
 from fluxpay.exceptions import BusinessError
+from organizations.models import Payment
 from organizations.roles import Perm
 from organizations.serializers import DecisionSerializer
 from organizations.views import OrgScopedMixin
 
 from . import services
-from .models import PayRun, Payslip, Worker
+from .models import PayRun, Worker
 from .serializers import (
     BookEntrySerializer,
     CategoryCreateSerializer,
@@ -29,6 +30,8 @@ from .serializers import (
     PayRunCreateSerializer,
     PayRunDetailSerializer,
     PayRunSerializer,
+    PayslipCreateSerializer,
+    PayslipSerializer,
     PayslipUpdateSerializer,
     ReclassifySerializer,
     ReverseSerializer,
@@ -124,6 +127,20 @@ class PayRunDetailView(WritesNeedPayments, APIView):
         return Response(PayRunSerializer(run).data)
 
 
+class PayslipAddView(WritesNeedPayments, APIView):
+    """POST .../pay-runs/<id>/payslips/ — an extra line in a draft run, e.g. an allowance or a bonus."""
+
+    def post(self, request, org_id, run_id):
+        serializer = PayslipCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        run = services.add_payslip(
+            membership=self.membership, run_id=run_id, worker_id=data["worker_id"], amount=data["amount"],
+            type_=data["type"],
+        )  # fmt: skip
+        return Response(PayRunDetailSerializer(run).data, status=status.HTTP_201_CREATED)
+
+
 class PayslipEditView(WritesNeedPayments, APIView):
     def patch(self, request, org_id, run_id, payslip_id):
         serializer = PayslipUpdateSerializer(data=request.data)
@@ -168,21 +185,25 @@ class PayslipReverseView(OrgScopedMixin, APIView):
         payslip = services.reverse_payslip(
             membership=self.membership, payslip_id=payslip_id, reason=serializer.validated_data["reason"]
         )
-        from .serializers import PayslipSerializer
-
         return Response(PayslipSerializer(payslip).data)
 
 
 class MyPayslipListView(generics.ListAPIView):
-    """A worker's own pay from every business that pays them through FluxPay."""
+    """A worker's own pay (salaries, allowances, bonuses...) from every business that pays them through FluxPay.
+
+    Only payments to them as a worker: what a business pays them for anything else isn't pay.
+    """
 
     serializer_class = MyPayslipSerializer
 
     def get_queryset(self):
         return (
-            Payslip.objects.select_related("pay_run__organization", "worker__wallet", "transfer")
-            .filter(worker__wallet__owner=self.request.user, status__in=[Payslip.Status.PAID, Payslip.Status.REVERSED])
-            .order_by("-pay_run__paid_at")
+            Payment.objects.select_related("organization", "pay_run", "worker__wallet")
+            .filter(
+                worker__wallet__owner=self.request.user,
+                status__in=[Payment.Status.COMPLETED, Payment.Status.REVERSED],
+            )
+            .order_by("-completed_at")
         )
 
 

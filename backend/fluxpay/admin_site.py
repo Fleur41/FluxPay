@@ -109,9 +109,9 @@ def sidebar_navigation(request):
             "items": [
                 _item("Businesses", "storefront", "organizations.organization"),
                 _item(
-                    "Payment approvals",
+                    "Business payments",
                     "fact_check",
-                    "organizations.paymentrequest",
+                    "organizations.payment",
                     badge="fluxpay.admin_site.badge_pending_approvals",
                 ),
                 _item("Invitations", "mail", "organizations.invitation"),
@@ -182,9 +182,9 @@ def _badge(count: int) -> str | None:
 
 
 def badge_pending_approvals(request):
-    from organizations.models import PaymentRequest
+    from organizations.models import Payment
 
-    return _badge(PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING_APPROVAL).count())
+    return _badge(Payment.objects.filter(status=Payment.Status.PENDING_APPROVAL).count())
 
 
 def _open_receipts():
@@ -219,7 +219,7 @@ def dashboard_callback(request, context):
     from audit.services import verify_chain
     from banking.models import Account, ManualAdjustment, Transaction, Transfer
     from notifications.models import Notification
-    from organizations.models import PaymentRequest
+    from organizations.models import Payment
     from payments.models import ExternalPayment
     from users.models import User
 
@@ -253,10 +253,10 @@ def dashboard_callback(request, context):
             "link": reverse("admin:accounting_cashbookentry_changelist") + "?allocation=open",
         },
         {
-            "perm": "organizations.view_paymentrequest",
+            "perm": "organizations.view_payment",
             "title": "Business payments waiting for approval",
-            "count": PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING_APPROVAL).count(),
-            "link": reverse("admin:organizations_paymentrequest_changelist") + "?status__exact=PENDING_APPROVAL",
+            "count": Payment.objects.filter(status=Payment.Status.PENDING_APPROVAL).count(),
+            "link": reverse("admin:organizations_payment_changelist") + "?status__exact=PENDING_APPROVAL",
         },
         {
             "perm": "payments.view_externalpayment",

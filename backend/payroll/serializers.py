@@ -1,11 +1,21 @@
 from decimal import Decimal
 
 from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounting.models import BusinessEntry, LedgerAccount
+from organizations.models import Payment
 
-from .models import PayRun, Payslip, Worker
+from .models import PayRun, Worker
+
+# The payslip API kept its original words for a payment's status: a paid payslip is "PAID".
+PAYSLIP_STATUS = {Payment.Status.COMPLETED: "PAID"}
+
+
+class PayslipStatusField(serializers.CharField):
+    def to_representation(self, value):
+        return PAYSLIP_STATUS.get(value, value)
 
 
 class WorkerSerializer(serializers.ModelSerializer):
@@ -63,19 +73,23 @@ class WorkerImportSerializer(serializers.Serializer):
 
 
 class PayslipSerializer(serializers.ModelSerializer):
+    """One line of a pay run (a business payment to a worker)."""
+
     worker_id = serializers.UUIDField(source="worker.id", read_only=True)
     worker_name = serializers.CharField(source="worker.name", read_only=True)
     account_number = serializers.CharField(source="worker.wallet.account_number", read_only=True)
     employee_number = serializers.CharField(source="worker.employee_number", read_only=True)
     job_title = serializers.CharField(source="worker.job_title", read_only=True)
+    type_label = serializers.CharField(source="get_type_display", read_only=True)
+    status = PayslipStatusField(read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
-    reference = serializers.CharField(source="transfer.reference", read_only=True, default=None)
     reversal_reference = serializers.CharField(source="reversal.reference", read_only=True, default=None)
 
     class Meta:
-        model = Payslip
-        fields = ("id", "worker_id", "worker_name", "account_number", "employee_number", "job_title", "amount",
-                  "status", "status_label", "reference", "reversal_reference", "reversed_at", "reversal_reason")  # fmt: skip
+        model = Payment
+        fields = ("id", "worker_id", "worker_name", "account_number", "employee_number", "job_title", "type",
+                  "type_label", "amount", "status", "status_label", "reference", "reversal_reference", "reversed_at",
+                  "reversal_reason")  # fmt: skip
 
 
 class PayRunSerializer(serializers.ModelSerializer):
@@ -105,13 +119,14 @@ class PayRunSerializer(serializers.ModelSerializer):
         return str(sum((r["amount"] for r in self._totals(run).values()), Decimal("0.00")))
 
     def get_reversed_total(self, run):
-        return str(self._totals(run).get(Payslip.Status.REVERSED, {}).get("amount") or "0.00")
+        return str(self._totals(run).get(Payment.Status.REVERSED, {}).get("amount") or "0.00")
 
     def get_worker_count(self, run):
-        return sum(r["count"] for r in self._totals(run).values())
+        # A worker can have several lines (salary and allowance); count people.
+        return run.payslips.values("worker").distinct().count()
 
     def get_reversed_count(self, run):
-        return self._totals(run).get(Payslip.Status.REVERSED, {}).get("count") or 0
+        return self._totals(run).get(Payment.Status.REVERSED, {}).get("count") or 0
 
 
 class PayRunDetailSerializer(PayRunSerializer):
@@ -136,22 +151,37 @@ class PayslipUpdateSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
 
 
+class PayslipCreateSerializer(serializers.Serializer):
+    worker_id = serializers.UUIDField()
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
+    type = serializers.ChoiceField(choices=[(t.value, t.label) for t in Payment.WORKER_TYPES])
+
+
 class ReverseSerializer(serializers.Serializer):
     reason = serializers.CharField(min_length=5, max_length=200)
 
 
 class MyPayslipSerializer(serializers.ModelSerializer):
-    business = serializers.CharField(source="pay_run.organization.name", read_only=True)
-    title = serializers.CharField(source="pay_run.title", read_only=True)
-    pay_date = serializers.DateField(source="pay_run.pay_date", read_only=True)
+    """A worker's view of one payment from a business: pay-run pay, or a one-off salary, bonus..."""
+
+    business = serializers.CharField(source="organization.name", read_only=True)
+    title = serializers.SerializerMethodField()
+    pay_date = serializers.SerializerMethodField()
     currency = serializers.CharField(source="worker.wallet.currency", read_only=True)
+    type_label = serializers.CharField(source="get_type_display", read_only=True)
+    status = PayslipStatusField(read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
-    reference = serializers.CharField(source="transfer.reference", read_only=True, default=None)
 
     class Meta:
-        model = Payslip
-        fields = ("id", "business", "title", "pay_date", "amount", "currency", "status", "status_label", "reference",
-                  "reversal_reason")  # fmt: skip
+        model = Payment
+        fields = ("id", "business", "title", "pay_date", "type", "type_label", "amount", "currency", "status",
+                  "status_label", "reference", "reversal_reason")  # fmt: skip
+
+    def get_title(self, payment) -> str:
+        return payment.pay_run.title if payment.pay_run_id else payment.note or payment.get_type_display()
+
+    def get_pay_date(self, payment):
+        return payment.pay_run.pay_date if payment.pay_run_id else timezone.localdate(payment.completed_at)
 
 
 # --- Business books ----------------------------------------------------------------------------

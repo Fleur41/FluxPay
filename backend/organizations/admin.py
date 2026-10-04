@@ -7,7 +7,7 @@ from unfold.decorators import display
 from audit.services import record
 from fluxpay.admin_base import ViewOnlyAdmin
 
-from .models import Invitation, Membership, Organization, PaymentRequest
+from .models import Invitation, Membership, Organization, Payment
 
 
 class MembershipInline(TabularInline):
@@ -78,34 +78,40 @@ class OrganizationAdmin(ModelAdmin):
             )
 
 
-@admin.register(PaymentRequest)
-class PaymentRequestAdmin(ViewOnlyAdmin):
+@admin.register(Payment)
+class PaymentAdmin(ViewOnlyAdmin):
     list_display = (
         "created_at",
         "organization",
+        "type",
+        "recipient_name",
         "amount",
-        "destination_account_number",
         "status_label",
+        "reference",
         "created_by",
         "decided_by",
     )
-    list_filter = ("status", ("created_at", RangeDateFilter))
+    list_filter = ("status", "type", ("created_at", RangeDateFilter))
     list_filter_submit = True
-    search_fields = ("organization__name", "destination_account_number", "created_by__email")
+    search_fields = ("reference", "organization__name", "recipient_name", "destination_account_number",
+                     "created_by__email")  # fmt: skip
     list_select_related = ("organization", "created_by", "decided_by")
 
     @display(
         description="Status",
         label={
             "PENDING_APPROVAL": "warning",
-            "EXECUTED": "success",
+            "PENDING": "info",
+            "PROCESSING": "info",
+            "COMPLETED": "success",
             "REJECTED": "danger",
             "CANCELLED": "",
             "FAILED": "danger",
+            "REVERSED": "danger",
         },
     )
-    def status_label(self, request_):
-        return request_.status, request_.get_status_display()
+    def status_label(self, payment):
+        return payment.status, payment.get_status_display()
 
 
 @admin.register(Invitation)

@@ -52,9 +52,9 @@ class AdminPagesTests(TestCase):
             note="",
             idempotency_key="admin-pages-2",
         )
-        org_services.create_payment_request(
+        org_services.create_payment(
             membership=membership,
-            source_account_id=org.accounts.get().id,
+            type="SUPPLIER",
             destination_account_number=b.account_number,
             amount=Decimal("200.00"),
             note="",

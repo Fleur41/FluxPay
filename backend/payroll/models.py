@@ -1,8 +1,9 @@
 """Businesses paying their workers: a register of workers, and pay runs that pay many of them at once.
 
 Workers are FluxPay users; their pay lands in their personal wallet. A pay run is one batch (e.g.
-"October 2026 salaries"); above the business's approval threshold a second person must approve it.
-A payment made in error can be taken back while the worker still holds the money.
+"October 2026 salaries") of business payments (organizations.Payment, `run.payslips`), one per worker and
+type; above the business's approval threshold a second person must approve it. A payment made in error can
+be taken back while the worker still holds the money.
 """
 
 import uuid
@@ -61,7 +62,7 @@ class PayRun(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
     decision_note = models.CharField(max_length=255, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
-    # The business cashbook line for the whole run.
+    # Runs paid before each payslip got its own cashbook line were booked as one line for the whole run.
     book_entry = models.OneToOneField(
         "accounting.BusinessEntry", on_delete=models.PROTECT, null=True, blank=True, related_name="pay_run"
     )
@@ -73,34 +74,3 @@ class PayRun(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.organization})"
-
-
-class Payslip(models.Model):
-    class Status(models.TextChoices):
-        PENDING = "PENDING", "Not paid yet"
-        PAID = "PAID", "Paid"
-        REVERSED = "REVERSED", "Reversed"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    pay_run = models.ForeignKey(PayRun, on_delete=models.PROTECT, related_name="payslips")
-    worker = models.ForeignKey(Worker, on_delete=models.PROTECT, related_name="payslips")
-    amount = models.DecimalField(**MONEY, validators=[MinValueValidator(Decimal("0.01"))])
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
-    transfer = models.OneToOneField(
-        "banking.Transfer", on_delete=models.PROTECT, null=True, blank=True, related_name="payslip"
-    )
-    reversal = models.OneToOneField(
-        "banking.Transfer", on_delete=models.PROTECT, null=True, blank=True, related_name="reversed_payslip"
-    )
-    reversed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
-    )
-    reversed_at = models.DateTimeField(null=True, blank=True)
-    reversal_reason = models.CharField(max_length=255, blank=True)
-
-    class Meta:
-        ordering = ("worker__wallet__owner__full_name",)
-        constraints = [models.UniqueConstraint(fields=("pay_run", "worker"), name="unique_payslip_per_run")]
-
-    def __str__(self) -> str:
-        return f"{self.worker.name} {self.amount} ({self.get_status_display()})"

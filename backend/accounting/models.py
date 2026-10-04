@@ -354,6 +354,7 @@ class BusinessEntry(models.Model):
         TRANSFER = "TRANSFER", "Transfer"
         PAYROLL = "PAYROLL", "Payroll"
         PAYROLL_REVERSAL = "PAYROLL_REVERSAL", "Payroll reversal"
+        REVERSAL = "REVERSAL", "Payment reversal"
         DEPOSIT = "DEPOSIT", "Deposit at FluxPay"
         CORRECTION = "CORRECTION", "Correction by FluxPay"
         WITHDRAWAL = "WITHDRAWAL", "Cash withdrawal"
