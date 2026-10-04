@@ -59,6 +59,7 @@ class PlatformSettingsAdmin(ModelAdmin):
     fieldsets = (
         ("Wallets", {"fields": ("default_currency",)}),
         ("Statements & invitations", {"fields": ("statement_max_days", "invitation_expiry_days")}),
+        ("Payroll", {"fields": ("payroll_reversal_days",)}),
         ("App security", {"fields": ("session_timeout_minutes",)}),
         (
             "Budget planner guideline",

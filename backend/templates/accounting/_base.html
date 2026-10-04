@@ -1,0 +1,49 @@
+{% extends 'admin/base_site.html' %}
+{% load i18n unfold %}
+{% comment %}Shared layout for the financial reports: a filter bar, the report card and a CSV download.{% endcomment %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .fin { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .fin th { text-align: left; font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--color-base-200); color: var(--color-base-500); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .fin td { padding: 9px 12px; border-bottom: 1px solid var(--color-base-100); vertical-align: top; }
+  .fin .num { text-align: right; white-space: nowrap; }
+  .fin .code { color: var(--color-base-500); width: 70px; }
+  .fin .section td { font-weight: 600; padding-top: 18px; border-bottom: none; color: var(--color-base-900); }
+  .fin .indent { padding-left: 28px; }
+  .fin .subtotal td { font-weight: 600; border-top: 1px solid var(--color-base-300); }
+  .fin .total td { font-weight: 700; border-top: 2px solid var(--color-base-700); border-bottom: 3px double var(--color-base-700); }
+  .fin .muted td, .fin td.muted { color: var(--color-base-500); }
+  .fin tr.row:hover td { background: var(--color-base-50); }
+  .fin a { color: var(--color-primary-600); }
+  .fin .neg { color: var(--color-red-600); }
+  .dark .fin th { border-color: var(--color-base-700); color: var(--color-base-400); }
+  .dark .fin td { border-color: var(--color-base-800); }
+  .dark .fin .section td { color: var(--color-base-100); }
+  .dark .fin .total td, .dark .fin .subtotal td { border-color: var(--color-base-500); }
+  .dark .fin tr.row:hover td { background: var(--color-base-800); }
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; }
+  .filters input, .filters select { border: 1px solid var(--color-base-200); border-radius: 6px; padding: 7px 10px; background: transparent; min-width: 150px; font-size: 14px; }
+  .dark .filters input, .dark .filters select { border-color: var(--color-base-700); }
+  .pill { display: inline-block; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .pill.ok { background: var(--color-green-100); color: var(--color-green-700); }
+  .pill.bad { background: var(--color-red-100); color: var(--color-red-700); }
+  .pill.warn { background: var(--color-orange-100); color: var(--color-orange-700); }
+  .scroll { overflow-x: auto; }
+  .note { font-size: 13px; color: var(--color-base-500); }
+  .report-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: baseline; }
+  @media (max-width: 640px) { .fin .code { display: none; } .fin td, .fin th { padding: 8px 6px; } .fin .indent { padding-left: 12px; } }
+  @media print { #nav-sidebar, header, .filters, .no-print { display: none !important; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-6">
+    <div class="flex flex-row flex-wrap items-center gap-3 no-print">
+        <a href="{% url 'accounting_reports' %}" class="text-primary-600 text-sm">← All reports</a>
+    </div>
+    {% block filters %}{% endblock %}
+    {% block report %}{% endblock %}
+</div>
+{% endblock %}

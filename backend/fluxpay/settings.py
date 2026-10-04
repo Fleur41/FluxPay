@@ -53,6 +53,8 @@ INSTALLED_APPS = [
     "audit",
     "notifications",
     "platform_settings",
+    "accounting",
+    "payroll",
 ]
 
 MIDDLEWARE = [

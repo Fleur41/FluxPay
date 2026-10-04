@@ -1,0 +1,33 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    <label>Account
+        <select name="account">
+            <option value="">Choose an account</option>
+            {% regroup accounts by currency as groups %}
+            {% for group in groups %}<optgroup label="{{ group.grouper }}">{% for a in group.list %}<option value="{{ a.pk }}" {% if account and a.pk == account.pk %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select>
+    </label>
+    <label>From <input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label>
+    <label>To <input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label>
+    {% if account %}{% include "accounting/_actions.html" %}{% else %}<button type="submit" class="font-medium inline-flex items-center rounded-default px-3 py-2 bg-primary-600 text-white">Show</button>{% endif %}
+</form>
+{% endblock %}
+{% block report %}
+{% if account %}
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div><h2 class="text-xl font-semibold text-important">{{ account.code }} {{ account.name }}</h2><div class="note">{{ account.get_type_display }} · {{ account.currency }} · {{ start|date:"j M Y" }} to {{ end|date:"j M Y" }}{% if account.description %} · {{ account.description }}{% endif %}</div></div>
+    <div class="scroll"><table class="fin">
+        <tr><th>Date</th><th>Journal</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr>
+        <tr class="muted"><td></td><td></td><td>Opening balance</td><td></td><td></td><td class="num">{{ gl.opening|amount }}</td></tr>
+        {% for r in gl.rows %}
+        <tr class="row"><td>{{ r.line.entry.date|date:"d M Y" }}</td><td><a href="{% url 'admin:accounting_journalentry_change' r.line.entry.pk %}">{{ r.line.entry.number }}</a></td><td>{{ r.line.description|default:r.line.entry.memo }}</td><td class="num">{{ r.line.debit|amount:True }}</td><td class="num">{{ r.line.credit|amount:True }}</td><td class="num">{{ r.balance|amount }}</td></tr>
+        {% empty %}<tr class="muted"><td></td><td></td><td>No postings in this period.</td><td></td><td></td><td></td></tr>{% endfor %}
+        <tr class="total"><td></td><td></td><td>Closing balance</td><td class="num">{{ gl.total_debit|amount }}</td><td class="num">{{ gl.total_credit|amount }}</td><td class="num">{{ gl.closing|amount }}</td></tr>
+    </table></div>
+</div>
+{% else %}
+<p class="note">Choose an account to see every posting to it.</p>
+{% endif %}
+{% endblock %}

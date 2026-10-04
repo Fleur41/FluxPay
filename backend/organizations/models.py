@@ -95,6 +95,8 @@ class PaymentRequest(models.Model):
     destination_account_number = models.CharField(max_length=10)
     amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     note = models.CharField(max_length=140, blank=True)
+    # What the payment is for in the business's own books (accounting.business.CHART); empty = suppliers.
+    books_category = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, db_index=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     decided_by = models.ForeignKey(

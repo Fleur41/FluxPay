@@ -7,11 +7,11 @@ from payments.signals import payment_settled
 
 
 @receiver(transfer_completed)
-def on_transfer_completed(sender, transfer, **kwargs):
+def on_transfer_completed(sender, transfer, notify_sender=True, **kwargs):
     from .tasks import alert_transfer_task
 
     transfer_id = str(transfer.id)
-    db_transaction.on_commit(lambda: alert_transfer_task.delay(transfer_id), robust=True)
+    db_transaction.on_commit(lambda: alert_transfer_task.delay(transfer_id, notify_sender), robust=True)
 
 
 @receiver(payment_settled)

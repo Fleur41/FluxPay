@@ -10,6 +10,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from banking.services import open_wallet, post_adjustment, transfer_funds
+from fluxpay.testing import customer_deposit
 from organizations import services as org_services
 from organizations.models import Membership
 
@@ -30,6 +31,7 @@ class AdminPagesTests(TestCase):
             kind="CREDIT",
             amount=Decimal("900.00"),
             reason="Cash deposited at the Nairobi office, receipt 1042",
+            cashbook_entry=customer_deposit("1500.00"),
         )
         transfer_funds(
             user=alice,
@@ -101,7 +103,8 @@ class AdminPagesTests(TestCase):
 
     def test_top_up_form_renders(self):
         res = self.client.get(reverse("admin:banking_manualadjustment_add"))
-        self.assertContains(res, "Find the wallet by account number")
+        self.assertContains(res, "Bank receipt")
+        self.assertContains(res, "left of 1,500.00")  # the receipt, with what is left to allocate
 
     def test_staff_see_only_what_they_may_use(self):
         support = User.objects.create_user("support@example.com", PASSWORD, full_name="Sam Support", is_staff=True)

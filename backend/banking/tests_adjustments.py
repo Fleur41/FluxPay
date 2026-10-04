@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from audit.models import AuditEvent
 from fluxpay.celery import app as celery_app
 from fluxpay.exceptions import BusinessError
+from fluxpay.testing import customer_deposit
 from notifications.models import Notification
 from organizations import services as org_services
 from platform_settings.models import Currency
@@ -26,10 +27,11 @@ class AdjustmentServiceTests(TestCase):
         self.staff = User.objects.create_user("ops@fluxpay.test", PASSWORD, full_name="Opal Ops", is_staff=True)
         self.customer = User.objects.create_user("simon@example.com", PASSWORD, full_name="Simon Kip")
         self.wallet = open_wallet(self.customer)
+        self.receipt = customer_deposit("5000.00")
 
     def credit(self, amount="500.00", **kwargs):
         return post_adjustment(staff=self.staff, account_id=self.wallet.id, kind="CREDIT", amount=Decimal(amount),
-                               reason=kwargs.get("reason", REASON))
+                               reason=kwargs.get("reason", REASON), cashbook_entry=self.receipt)
 
     def test_top_up_moves_money_from_the_adjustments_account(self):
         adjustment = self.credit("500.00")
@@ -48,12 +50,12 @@ class AdjustmentServiceTests(TestCase):
     def test_correction_takes_money_back_but_never_below_zero(self):
         self.credit("500.00")
         post_adjustment(staff=self.staff, account_id=self.wallet.id, kind="DEBIT", amount=Decimal("200.00"),
-                        reason="Duplicate top-up on 4 Oct, reversing part of it")
+                        reason="Duplicate top-up on 4 Oct, reversing part of it", cashbook_entry=self.receipt)
         self.wallet.refresh_from_db()
         self.assertEqual(self.wallet.balance, Decimal("300.00"))
         with self.assertRaises(BusinessError) as ctx:
             post_adjustment(staff=self.staff, account_id=self.wallet.id, kind="DEBIT", amount=Decimal("300.01"),
-                            reason="Trying to take more than the wallet holds")
+                            reason="Trying to take more than the wallet holds", cashbook_entry=self.receipt)
         self.assertEqual(ctx.exception.error_code, "insufficient_funds")
         self.wallet.refresh_from_db()
         self.assertEqual(self.wallet.balance, Decimal("300.00"))
@@ -73,12 +75,14 @@ class AdjustmentServiceTests(TestCase):
     def test_system_accounts_cannot_be_adjusted(self):
         pool = system_account("adjustments:KES", "Manual adjustments KES", "KES")
         with self.assertRaises(BusinessError):
-            post_adjustment(staff=self.staff, account_id=pool.id, kind="CREDIT", amount=Decimal("10"), reason=REASON)
+            post_adjustment(staff=self.staff, account_id=pool.id, kind="CREDIT", amount=Decimal("10"), reason=REASON,
+                            cashbook_entry=self.receipt)
 
     def test_business_wallets_can_be_topped_up(self):
         org = org_services.create_organization(user=self.customer, name="Kip Traders")
         business = org.accounts.get()
-        post_adjustment(staff=self.staff, account_id=business.id, kind="CREDIT", amount=Decimal("1000"), reason=REASON)
+        post_adjustment(staff=self.staff, account_id=business.id, kind="CREDIT", amount=Decimal("1000"), reason=REASON,
+                        cashbook_entry=self.receipt)
         business.refresh_from_db()
         self.assertEqual(business.balance, Decimal("1000.00"))
 
@@ -111,7 +115,8 @@ class AdjustmentAlertTests(TestCase):
         customer = User.objects.create_user("simon@example.com", PASSWORD, full_name="Simon Kip", phone_number="0711000222")
         wallet = open_wallet(customer)
         with self.captureOnCommitCallbacks(execute=True):
-            post_adjustment(staff=staff, account_id=wallet.id, kind="CREDIT", amount=Decimal("750.00"), reason=REASON)
+            post_adjustment(staff=staff, account_id=wallet.id, kind="CREDIT", amount=Decimal("750.00"), reason=REASON,
+                            cashbook_entry=customer_deposit("750.00"))
         self.assertEqual([m.subject for m in mail.outbox], ["FluxPay added KES 750.00 to your wallet"])
         self.assertIn("New balance: KES 750.00", mail.outbox[0].body)
         self.assertNotIn(REASON, mail.outbox[0].body)  # the internal reason stays internal
@@ -127,12 +132,20 @@ class AdjustmentAdminTests(TestCase):
         self.customer = User.objects.create_user("simon@example.com", PASSWORD, full_name="Simon Kip")
         self.wallet = open_wallet(self.customer)
         self.staff = User.objects.create_user("ops@fluxpay.test", PASSWORD, full_name="Opal Ops", is_staff=True)
+        self.receipt = customer_deposit("5000.00")
 
     def grant(self):
         self.staff.user_permissions.add(Permission.objects.get(codename="post_adjustment"))
 
     def post(self, **fields):
-        data = {"account": str(self.wallet.id), "kind": "CREDIT", "amount": "500.00", "reason": REASON, **fields}
+        data = {
+            "cashbook_entry": str(self.receipt.pk),
+            "account": str(self.wallet.id),
+            "kind": "CREDIT",
+            "amount": "500.00",
+            "reason": REASON,
+            **fields,
+        }
         return self.client.post(self.URL + "add/", data)
 
     def test_staff_need_the_permission(self):

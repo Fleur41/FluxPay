@@ -17,13 +17,18 @@
             {% component "unfold/components/title.html" %}{{ greeting }}, {{ request.user.full_name|default:request.user.email }}{% endcomponent %}
             {% component "unfold/components/text.html" %}Here is FluxPay at a glance. Anything that needs a person is listed under “Needs attention”.{% endcomponent %}
         </div>
-        {% if can_post_adjustment %}
-            <div class="shrink-0">
-                {% component "unfold/components/button.html" with href=adjustment_add_url size="md" %}
+        <div class="flex flex-row flex-wrap gap-2 shrink-0">
+            {% if can_record_cashbook %}
+                {% component "unfold/components/button.html" with href=cashbook_add_url size="md" %}
+                    <span class="material-symbols-outlined">account_balance</span> Record money in the bank
+                {% endcomponent %}
+            {% endif %}
+            {% if can_post_adjustment %}
+                {% component "unfold/components/button.html" with href=adjustment_add_url size="md" variant="default" %}
                     <span class="material-symbols-outlined">add_card</span> Top up a wallet
                 {% endcomponent %}
-            </div>
-        {% endif %}
+            {% endif %}
+        </div>
     </div>
 
     {# Key figures #}
@@ -80,6 +85,25 @@
                 </div>
             {% endcomponent %}
             {% endif %}
+
+            {% for sg in safeguarding %}
+            {% component "unfold/components/card.html" with title="Customer money "|add:sg.currency %}
+                <div class="flex flex-col gap-3">
+                    <div class="flex flex-row items-center justify-between gap-3">
+                        <span class="text-sm">Backed by the bank</span>
+                        {% if sg.backed %}
+                            {% include "unfold/helpers/label.html" with text="Fully backed" type="success" %}
+                        {% else %}
+                            {% include "unfold/helpers/label.html" with text="Shortfall" type="danger" %}
+                        {% endif %}
+                    </div>
+                    <div class="flex flex-row justify-between text-sm"><span>In the bank</span><span>{{ sg.held|floatformat:"2g" }}</span></div>
+                    <div class="flex flex-row justify-between text-sm"><span>Owed to customers</span><span>{{ sg.owed|floatformat:"2g" }}</span></div>
+                    <div class="flex flex-row justify-between text-sm font-semibold"><span>{% if sg.backed %}Surplus{% else %}Shortfall{% endif %}</span><span>{{ sg.surplus|floatformat:"2g" }}</span></div>
+                    {% component "unfold/components/link.html" with href=reports_url icon="monitoring" %}Financial reports{% endcomponent %}
+                </div>
+            {% endcomponent %}
+            {% endfor %}
 
             {% if can.audit %}
             {% component "unfold/components/card.html" with title="Audit log" %}

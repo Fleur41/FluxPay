@@ -27,7 +27,8 @@ class MembershipInline(TabularInline):
 class OrganizationAdmin(ModelAdmin):
     """Staff may suspend or reactivate a business (audited); owners manage everything else in the app."""
 
-    list_display = ("name", "registration_number", "status_label", "approval_threshold", "members", "created_at")
+    list_display = ("name", "registration_number", "status_label", "approval_threshold", "members", "workers",
+                    "books", "created_at")  # fmt: skip
     list_filter = ("status", ("created_at", RangeDateFilter))
     list_filter_submit = True
     search_fields = ("name", "registration_number")
@@ -49,6 +50,20 @@ class OrganizationAdmin(ModelAdmin):
     @display(description="Members")
     def members(self, organization):
         return organization.memberships.filter(is_active=True).count()
+
+    @display(description="Workers")
+    def workers(self, organization):
+        return organization.workers.filter(is_active=True).count()
+
+    @display(description="")
+    def books(self, organization):
+        from django.urls import reverse
+        from django.utils.html import format_html
+
+        return format_html(
+            '<a class="text-primary-600" href="{}?organization={}">Books →</a>', reverse("accounting_business"),
+            organization.pk,
+        )  # fmt: skip
 
     @transaction.atomic
     def save_model(self, request, obj, form, change):

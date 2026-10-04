@@ -37,8 +37,11 @@ class Alert:
 # --- Building alerts ----------------------------------------------------------------------------
 
 
-def alert_transfer(transfer_id) -> list[Notification]:
-    """Tells the sending side and the receiving side of a transfer."""
+def alert_transfer(transfer_id, notify_sender=True) -> list[Notification]:
+    """Tells the sending side and the receiving side of a transfer.
+
+    `notify_sender=False` for bulk payments (payroll), where the business gets one summary instead.
+    """
     transfer = Transfer.objects.select_related(
         "source__owner", "source__organization", "destination__owner", "destination__organization"
     ).get(id=transfer_id)
@@ -49,8 +52,10 @@ def alert_transfer(transfer_id) -> list[Notification]:
     sender, recipient = holder_name(transfer.source), holder_name(transfer.destination)
     note = f'\nNote: "{transfer.note}"' if transfer.note else ""
 
+    if transfer.reverses_id:
+        return _alert_reversal(transfer, debit, credit, amount, when)
     created = []
-    if debit:
+    if debit and notify_sender:
         whose = _whose(transfer.source)
         balance = _money(debit.balance_after, transfer.source.currency)
         created += _queue_for(
@@ -86,6 +91,49 @@ def alert_transfer(transfer_id) -> list[Notification]:
                     f"FluxPay: {whose} received {amount} from {sender} ({_mask(transfer.source.account_number)}) "
                     f"on {when}. Ref {transfer.reference}. Bal {balance}."
                 ),
+            ),
+        )
+    return created
+
+
+def _alert_reversal(transfer, debit, credit, amount, when) -> list[Notification]:
+    """A payment taken back by the payer: tell the person it was taken from, and the payer."""
+    payer, payee = transfer.destination, transfer.source  # the reversal runs payee -> payer
+    reason = transfer.note.split(": ", 1)[-1]
+    original = transfer.reverses.reference
+    created = []
+    if debit:
+        balance = _money(debit.balance_after, payee.currency)
+        created += _queue_for(
+            payee,
+            Alert(
+                event="transfer.reversed",
+                reference=transfer.reference,
+                subject=f"{holder_name(payer)} reversed a payment of {amount}",
+                email_body=(
+                    f"{holder_name(payer)} took back {amount} it paid you in error (payment {original}) on {when}.\n"
+                    f"Reason: {reason}\n\nReference: {transfer.reference}\nNew balance: {balance}\n"
+                    "If you think this is wrong, contact them or FluxPay support with the reference.\n"
+                ),
+                sms_body=(
+                    f"FluxPay: {holder_name(payer)} reversed {amount} paid to you in error ({original}). "
+                    f"Ref {transfer.reference}. Bal {balance}."
+                ),
+            ),
+        )
+    if credit:
+        balance = _money(credit.balance_after, payer.currency)
+        wallet = f"{payer.organization.name}'s wallet" if payer.organization_id else "your wallet"
+        created += _queue_for(
+            payer,
+            Alert(
+                event="transfer.reversal_received",
+                reference=transfer.reference,
+                subject=f"{amount} taken back from {holder_name(payee)}",
+                email_body=(
+                    f"{amount} paid to {holder_name(payee)} (payment {original}) was returned to {wallet} on {when}.\nReason: {reason}\n\nReference: {transfer.reference}\nNew balance: {balance}\n"
+                ),
+                sms_body=f"FluxPay: {amount} taken back from {holder_name(payee)} ({original}). Bal {balance}.",
             ),
         )
     return created
@@ -151,6 +199,13 @@ def alert_adjustment(adjustment_id) -> list[Notification]:
             "adjustment.credited", ref, f"FluxPay added {amount} to {wallet}",
             f"FluxPay added {amount} to {wallet} ({masked}) on {when}.\n\nReference: {ref}\nNew balance: {balance}\n",
             f"FluxPay: {amount} added to {wallet} ({masked}) on {when}. Ref {ref}. Bal {balance}.",
+        )
+    elif adjustment.kind == ManualAdjustment.Kind.PAYOUT:
+        alert = Alert(
+            "adjustment.paid_out", ref, f"{amount} withdrawn from {wallet} in cash",
+            f"FluxPay paid you {amount} in cash from {wallet} ({masked}) on {when}.\n\n"
+            f"Reference: {ref}\nNew balance: {balance}\n",
+            f"FluxPay: {amount} cash withdrawal from {wallet} ({masked}) on {when}. Ref {ref}. Bal {balance}.",
         )
     else:
         alert = Alert(

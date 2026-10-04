@@ -85,6 +85,7 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
             "source_account_number",
             "destination_account_number",
             "note",
+            "books_category",
             "created_by",
             "decided_by",
             "decided_at",
@@ -104,6 +105,10 @@ class PaymentRequestCreateSerializer(serializers.Serializer):
     # Positive only; the currency's minimum and maximum are enforced by the service (platform_settings).
     amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     note = serializers.CharField(max_length=140, required=False, allow_blank=True, default="")
+    # Files the payment in the business's books; defaults to purchases and suppliers.
+    books_category = serializers.ChoiceField(
+        choices=["suppliers", "expenses", "salaries", "drawings"], required=False, default="suppliers"
+    )
     idempotency_key = serializers.CharField(max_length=64, min_length=8)
 
 

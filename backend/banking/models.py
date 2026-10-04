@@ -106,6 +106,10 @@ class Transfer(models.Model):
     reference = models.CharField(max_length=24, unique=True)
     # Lets the app retry a request safely without sending money twice.
     idempotency_key = models.CharField(max_length=64)
+    # Set when this transfer took a wrong payment back (e.g. a business pulling back a salary paid in error).
+    reverses = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="reversed_by"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -116,24 +120,34 @@ class Transfer(models.Model):
 
 
 class ManualAdjustment(models.Model):
-    """Money a staff member added to (top-up) or took back from (correction) a wallet, with the reason.
+    """Money staff credited to a wallet from a bank receipt (top-up), returned to that receipt (correction),
+    or paid out of the wallet in cash from the bank (payout), with the reason.
 
-    Posted double-entry against the "Manual adjustments" system account by banking.services.post_adjustment.
-    Never edited or deleted: a mistake is fixed with an opposite adjustment.
+    Posted by banking.services.post_adjustment, which also books it in the general ledger. Never edited
+    or deleted: a mistake is fixed with an opposite adjustment.
     """
 
     class Kind(models.TextChoices):
-        CREDIT = "CREDIT", "Top-up (add money)"
-        DEBIT = "DEBIT", "Correction (take money back)"
+        CREDIT = "CREDIT", "Top-up (credit the wallet from a bank receipt)"
+        DEBIT = "DEBIT", "Correction (return money to the bank receipt)"
+        PAYOUT = "PAYOUT", "Cash withdrawal paid from the bank"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="adjustments")
-    kind = models.CharField(max_length=6, choices=Kind.choices)
-    amount = models.DecimalField(
-        max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    # The receipt the money came from (top-ups and corrections) or the payment that paid it out (payouts).
+    # Empty only on adjustments made before the cashbook existed.
+    cashbook_entry = models.ForeignKey(
+        "accounting.CashbookEntry",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="adjustments",
+        verbose_name="bank receipt",
     )
+    kind = models.CharField(max_length=6, choices=Kind.choices)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     reason = models.CharField(
-        max_length=255, help_text="Why, for the audit trail, e.g. \"Cash deposited at the Nairobi office, receipt 1042\"."
+        max_length=255, help_text='Why, for the audit trail, e.g. "Cash deposited at the Nairobi office, receipt 1042".'
     )
     reference = models.CharField(max_length=24, unique=True)
     balance_after = models.DecimalField(max_digits=14, decimal_places=2)

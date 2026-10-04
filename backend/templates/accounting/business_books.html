@@ -1,0 +1,67 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    <label>Business
+        <select name="organization"><option value="">Choose a business</option>{% for o in organizations %}<option value="{{ o.pk }}" {% if organization and o.pk == organization.pk %}selected{% endif %}>{{ o.name }}</option>{% endfor %}</select>
+    </label>
+    {% if wallets|length > 1 %}<label>Wallet <select name="wallet">{% for w in wallets %}<option value="{{ w.pk }}" {% if w.pk == wallet.pk %}selected{% endif %}>{{ w.account_number }} ({{ w.currency }})</option>{% endfor %}</select></label>{% endif %}
+    <label>From <input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label>
+    <label>To <input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label>
+    {% if wallet %}{% include "accounting/_actions.html" %}{% else %}<button type="submit" class="font-medium inline-flex items-center rounded-default px-3 py-2 bg-primary-600 text-white">Show</button>{% endif %}
+</form>
+{% endblock %}
+{% block report %}
+{% if wallet %}
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-5"><div class="note">Wallet balance</div><div class="text-xl font-semibold">{{ currency }} {{ cb.closing|amount }}</div><div class="note">Wallet {{ wallet.account_number }}</div></div>
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-5"><div class="note">Money in ({{ start|date:"j M" }}–{{ end|date:"j M" }})</div><div class="text-xl font-semibold">{{ cb.money_in|amount }}</div></div>
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-5"><div class="note">Money out</div><div class="text-xl font-semibold">{{ cb.money_out|amount }}</div></div>
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-5"><div class="note">{% if pl.profit >= 0 %}Profit{% else %}Loss{% endif %} for the period</div><div class="text-xl font-semibold">{{ pl.profit|amount }}</div><div class="note">{{ workers }} worker{{ workers|pluralize }} on payroll</div></div>
+</div>
+
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div class="report-head"><div><h2 class="text-xl font-semibold text-important">Cashbook – {{ organization.name }}</h2><div class="note">FluxPay wallet {{ wallet.account_number }} · {{ start|date:"j M Y" }} to {{ end|date:"j M Y" }} · the balance always equals the wallet</div></div></div>
+    <div class="scroll"><table class="fin">
+        <tr><th>Date</th><th>Details</th><th>Category</th><th class="num">Money in</th><th class="num">Money out</th><th class="num">Balance</th></tr>
+        <tr class="muted"><td></td><td>Opening balance</td><td></td><td></td><td></td><td class="num">{{ cb.opening|amount }}</td></tr>
+        {% for r in cb.rows %}{% with e=r.entry %}
+        <tr class="row"><td>{{ e.date|date:"d M Y" }}</td><td>{{ e.counterparty }} <span class="note">· {{ e.description }}</span></td><td>{{ e.category.name }}</td>
+            <td class="num">{% if e.direction == "IN" %}{{ e.amount|amount }}{% endif %}</td><td class="num">{% if e.direction == "OUT" %}{{ e.amount|amount }}{% endif %}</td><td class="num">{{ r.balance|amount }}</td></tr>
+        {% endwith %}{% empty %}<tr class="muted"><td></td><td>No movements in this period.</td><td></td><td></td><td></td><td></td></tr>{% endfor %}
+        <tr class="total"><td></td><td>Closing balance</td><td></td><td class="num">{{ cb.money_in|amount }}</td><td class="num">{{ cb.money_out|amount }}</td><td class="num">{{ cb.closing|amount }}</td></tr>
+    </table></div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+        <div><h2 class="text-xl font-semibold text-important">Income statement</h2><div class="note">{{ start|date:"j M Y" }} to {{ end|date:"j M Y" }} · {{ currency }}</div></div>
+        <table class="fin">
+            <tr class="section"><td colspan="3">Income</td></tr>
+            {% for r in pl.income.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">None</td><td></td></tr>{% endfor %}
+            <tr class="subtotal"><td></td><td>Total income</td><td class="num">{{ pl.income.total|amount }}</td></tr>
+            <tr class="section"><td colspan="3">Expenses</td></tr>
+            {% for r in pl.expenses.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">None</td><td></td></tr>{% endfor %}
+            <tr class="subtotal"><td></td><td>Total expenses</td><td class="num">{{ pl.expenses.total|amount }}</td></tr>
+            <tr class="total"><td></td><td>{% if pl.profit >= 0 %}Profit{% else %}Loss{% endif %}</td><td class="num">{{ pl.profit|amount }}</td></tr>
+        </table>
+    </div>
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+        <div class="report-head"><div><h2 class="text-xl font-semibold text-important">Balance sheet</h2><div class="note">At {{ end|date:"j M Y" }} · {{ currency }}</div></div>{% if bs.balanced %}<span class="pill ok">Balances</span>{% else %}<span class="pill bad">Does not balance</span>{% endif %}</div>
+        <table class="fin">
+            <tr class="section"><td colspan="3">Assets</td></tr>
+            {% for r in bs.assets.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
+            <tr class="subtotal"><td></td><td>Total assets</td><td class="num">{{ bs.assets.total|amount }}</td></tr>
+            <tr class="section"><td colspan="3">Equity</td></tr>
+            {% for r in bs.equity.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
+            {% for name, value in bs.equity.extra %}<tr class="row"><td></td><td class="indent">{{ name }}</td><td class="num">{{ value|amount }}</td></tr>{% endfor %}
+            <tr class="total"><td></td><td>Total equity</td><td class="num">{{ bs.equity.total|amount }}</td></tr>
+        </table>
+    </div>
+</div>
+{% elif organization %}
+<p class="note">This business has no wallet yet.</p>
+{% else %}
+<p class="note">Choose a business to see its own books: the cashbook of its FluxPay wallet, its income statement and balance sheet. These are the business's books, kept separately from FluxPay's.</p>
+{% endif %}
+{% endblock %}
