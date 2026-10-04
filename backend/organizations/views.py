@@ -11,12 +11,14 @@ from banking.models import Account, Transaction
 from banking.serializers import AccountSerializer, TransactionSerializer
 from banking.views import statement_response
 
-from . import services
-from .models import Invitation, Membership, Payment
-from .roles import Perm
+from . import beneficiaries, services
+from .models import Beneficiary, Invitation, Membership, Payment
+from .roles import Perm, has_perm
 from .serializers import (
     AcceptInvitationSerializer,
     AuditEventSerializer,
+    BeneficiarySerializer,
+    BeneficiaryWriteSerializer,
     DecisionSerializer,
     InvitationCreateSerializer,
     InvitationSerializer,
@@ -166,7 +168,8 @@ class OrgTransactionListView(OrgScopedMixin, generics.ListAPIView):
 class PaymentListCreateView(OrgScopedMixin, generics.ListAPIView):
     """GET/POST /organizations/<id>/payments/ — every payment out of the cashbook, pay-run payslips included.
 
-    Filters: ?status=, ?type=, ?worker=<worker id>, ?pay_run=<run id> or ?pay_run=none for payments made on their own.
+    Filters: ?status=, ?type=, ?worker=<worker id>, ?beneficiary=<id>, ?pay_run=<run id> or ?pay_run=none for
+    payments made on their own.
     """
 
     serializer_class = PaymentSerializer
@@ -186,6 +189,8 @@ class PaymentListCreateView(OrgScopedMixin, generics.ListAPIView):
                 payments = payments.filter(**{field: params[field]})
         if params.get("worker"):
             payments = payments.filter(worker_id=params["worker"])
+        if params.get("beneficiary"):
+            payments = payments.filter(beneficiary_id=params["beneficiary"])
         if params.get("pay_run") == "none":
             payments = payments.filter(pay_run__isnull=True)
         elif params.get("pay_run"):
@@ -232,6 +237,71 @@ class PaymentActionView(OrgScopedMixin, APIView):
             decide = services.approve_payment if action == "approve" else services.reject_payment
             payment = decide(membership=self.membership, payment_id=payment_id, note=serializer.validated_data["note"])
         return Response(PaymentSerializer(payment).data)
+
+
+class BeneficiaryMixin(OrgScopedMixin):
+    def perm_for(self, request):
+        return Perm.VIEW if request.method == "GET" else Perm.MANAGE_BENEFICIARIES
+
+    def respond(self, beneficiary, status_code=status.HTTP_200_OK):
+        full = has_perm(self.membership.role, Perm.MANAGE_BENEFICIARIES)
+        return Response(BeneficiarySerializer(beneficiary, context={"full_details": full}).data, status=status_code)
+
+
+class BeneficiaryListCreateView(BeneficiaryMixin, generics.ListAPIView):
+    """GET/POST /organizations/<id>/beneficiaries/ — ?search=, ?kind=, ?active=all to include archived ones."""
+
+    serializer_class = BeneficiarySerializer
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(),
+                "full_details": has_perm(self.membership.role, Perm.MANAGE_BENEFICIARIES)}  # fmt: skip
+
+    def get_queryset(self):
+        found = Beneficiary.objects.select_related("verified_by", "details_changed_by").filter(
+            organization_id=self.membership.organization_id
+        )
+        params = self.request.query_params
+        if params.get("active", "true") != "all":
+            found = found.filter(is_active=True)
+        if params.get("kind"):
+            found = found.filter(kind=params["kind"])
+        if search := params.get("search", "").strip():
+            found = found.filter(name__icontains=search)
+        return found
+
+    def post(self, request, org_id):
+        serializer = BeneficiaryWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        beneficiary = beneficiaries.add(membership=self.membership, **serializer.validated_data)
+        return self.respond(beneficiary, status.HTTP_201_CREATED)
+
+
+class BeneficiaryDetailView(BeneficiaryMixin, APIView):
+    def get(self, request, org_id, beneficiary_id):
+        return self.respond(beneficiaries.get(self.membership, beneficiary_id))
+
+    def patch(self, request, org_id, beneficiary_id):
+        serializer = BeneficiaryWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        beneficiary = beneficiaries.update(
+            membership=self.membership, beneficiary_id=beneficiary_id, **serializer.validated_data
+        )
+        return self.respond(beneficiary)
+
+    def delete(self, request, org_id, beneficiary_id):
+        """Archives: past payments keep pointing at it."""
+        return self.respond(beneficiaries.archive(membership=self.membership, beneficiary_id=beneficiary_id))
+
+
+class BeneficiaryVerifyView(BeneficiaryMixin, APIView):
+    """POST .../beneficiaries/<id>/verify/ — an owner or admin confirms the payout details."""
+
+    def perm_for(self, request):
+        return Perm.APPROVE_PAYMENT
+
+    def post(self, request, org_id, beneficiary_id):
+        return self.respond(beneficiaries.verify(membership=self.membership, beneficiary_id=beneficiary_id))
 
 
 class OrgAuditEventListView(OrgScopedMixin, generics.ListAPIView):

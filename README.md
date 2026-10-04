@@ -21,7 +21,7 @@ FluxPay/
 | **Statements** | PDF or CSV account statements for a date range, shared from the app |
 | **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
 | **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
-| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, typed payments to workers and suppliers with approval and reversal, payroll, and an audit log (API) |
+| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, typed payments to workers and saved beneficiaries (suppliers, contractors...) with verification, approval and reversal, payroll, and an audit log (API) |
 | **Receive** | Share your name and account number from the dashboard so people can pay you |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
 | **Admin dashboard** | Staff back-office at `/admin/`: KPIs, customer balances, wallet top-ups and corrections, business oversight, alerts, audit log and platform rules ([guide](#admin-dashboard)) |
@@ -322,6 +322,9 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET/POST | `organizations/{id}/payments/?status=&type=&worker=&pay_run=` | every payment out of the cashbook (`pay_run=none`: only one-off payments). POST `{type, worker_id \| destination_account_number, amount, note, books_category?, idempotency_key}`; `type` is `SALARY`, `ALLOWANCE`, `BONUS`, `COMMISSION`, `OTHER_WORKER` (need `worker_id`), or `SUPPLIER`, `VENDOR`, `CONTRACTOR`, `EXPENSE`, `OTHER` (need an account number) |
 | POST | `organizations/{id}/payments/{payment_id}/{approve\|reject\|cancel}/` | decide on a payment waiting for approval (`{note}`) |
 | POST | `organizations/{id}/payments/{payment_id}/reverse/` | take back a paid payment, `{reason}`; owners and admins, within the reversal window |
+| GET/POST | `organizations/{id}/beneficiaries/?search=&kind=&active=all` | saved suppliers, contractors, landlords... POST `{name, kind, method, …details}`; `method` is `FLUXPAY` (`account_number`), `MPESA_MOBILE` (`mpesa_phone`), `MPESA_PAYBILL` (`paybill_number`, `paybill_account`), `MPESA_TILL` (`till_number`) or `BANK` (`bank_name`, `bank_account_name`, `bank_account_number`, optional `bank_branch`, `bank_swift_code`). Viewers see account numbers masked |
+| GET/PATCH/DELETE | `organizations/{id}/beneficiaries/{beneficiary_id}/` | one beneficiary; changing payout details unverifies it; DELETE archives |
+| POST | `organizations/{id}/beneficiaries/{beneficiary_id}/verify/` | an owner or admin confirms the payout details; not the person who entered them, unless they are the only approver. Only verified beneficiaries can be paid: POST `payments/` with `{beneficiary_id, amount, idempotency_key}` (`type` defaults from the kind). For now only `FLUXPAY` beneficiaries can be paid |
 | GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
 | POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
 | POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |

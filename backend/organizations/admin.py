@@ -7,7 +7,7 @@ from unfold.decorators import display
 from audit.services import record
 from fluxpay.admin_base import ViewOnlyAdmin
 
-from .models import Invitation, Membership, Organization, Payment
+from .models import Beneficiary, Invitation, Membership, Organization, Payment
 
 
 class MembershipInline(TabularInline):
@@ -112,6 +112,22 @@ class PaymentAdmin(ViewOnlyAdmin):
     )
     def status_label(self, payment):
         return payment.status, payment.get_status_display()
+
+
+@admin.register(Beneficiary)
+class BeneficiaryAdmin(ViewOnlyAdmin):
+    """Businesses manage their own beneficiaries in the app; staff can look them up here."""
+
+    list_display = ("name", "organization", "kind", "method", "verified", "is_active", "details_changed_at")
+    list_filter = ("kind", "method", "is_active")
+    search_fields = ("name", "organization__name", "account_number", "mpesa_phone", "paybill_number",
+                     "till_number", "bank_account_number")  # fmt: skip
+    search_help_text = "Search by name, business, or any account, phone, paybill or till number"
+    list_select_related = ("organization",)
+
+    @display(description="Details", label={"Verified": "success", "Not verified": "warning"})
+    def verified(self, beneficiary):
+        return "Verified" if beneficiary.is_verified else "Not verified"
 
 
 @admin.register(Invitation)

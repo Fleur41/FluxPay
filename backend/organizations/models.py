@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Organization(models.Model):
@@ -79,6 +80,91 @@ class Invitation(models.Model):
         return f"{self.email} -> {self.organization} ({self.role})"
 
 
+class Beneficiary(models.Model):
+    """Someone other than its own workers that a business pays: a supplier, a contractor, the landlord...
+
+    They don't need a FluxPay account: the payout details say where their money goes. Changing those details
+    unverifies them, and nothing is paid to the beneficiary until an approver has checked the new ones
+    (organizations.beneficiaries.verify), so a changed bank account can't quietly redirect payments.
+    Never deleted: a beneficiary the business stops paying is archived, and past payments still point at it.
+    """
+
+    class Kind(models.TextChoices):
+        SUPPLIER = "SUPPLIER", "Supplier"
+        VENDOR = "VENDOR", "Vendor"
+        CONTRACTOR = "CONTRACTOR", "Contractor"
+        LANDLORD = "LANDLORD", "Landlord"
+        SERVICE_PROVIDER = "SERVICE_PROVIDER", "Service provider"
+        UTILITY = "UTILITY", "Utility"
+        OTHER = "OTHER", "Other"
+
+    class Method(models.TextChoices):
+        FLUXPAY = "FLUXPAY", "FluxPay account"
+        MPESA_MOBILE = "MPESA_MOBILE", "M-Pesa phone number"
+        MPESA_PAYBILL = "MPESA_PAYBILL", "M-Pesa paybill"
+        MPESA_TILL = "MPESA_TILL", "M-Pesa till (Buy Goods)"
+        BANK = "BANK", "Bank transfer"
+
+    # Where the money goes. Changing any of these needs the beneficiary verified again.
+    PAYOUT_FIELDS = (
+        "method", "account_number", "mpesa_phone", "paybill_number", "paybill_account", "till_number",
+        "bank_name", "bank_branch", "bank_account_name", "bank_account_number", "bank_swift_code",
+    )  # fmt: skip
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="beneficiaries")
+    name = models.CharField(max_length=150)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    # Where its payments are filed in the business's books (accounting.business.CHART); empty = from the kind.
+    books_category = models.CharField(max_length=20, blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
+    contact_email = models.EmailField(blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+
+    method = models.CharField(max_length=16, choices=Method.choices)
+    account_number = models.CharField(max_length=10, blank=True)  # FluxPay
+    mpesa_phone = models.CharField(max_length=16, blank=True)  # E.164, +2547... or +2541...
+    paybill_number = models.CharField(max_length=7, blank=True)
+    paybill_account = models.CharField(max_length=20, blank=True)  # the account number at that paybill
+    till_number = models.CharField(max_length=7, blank=True)
+    bank_name = models.CharField(max_length=80, blank=True)
+    bank_branch = models.CharField(max_length=80, blank=True)
+    bank_account_name = models.CharField(max_length=150, blank=True)
+    bank_account_number = models.CharField(max_length=34, blank=True)
+    bank_swift_code = models.CharField(max_length=11, blank=True)
+
+    details_changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    details_changed_at = models.DateTimeField()
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name_plural = "beneficiaries"
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"), "organization", condition=models.Q(is_active=True), name="unique_active_beneficiary_name"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.organization})"
+
+    @property
+    def is_verified(self) -> bool:
+        return self.verified_at is not None
+
+    def payout_details(self) -> dict:
+        """The payout details as they are now; a payment keeps a copy to prove where it was sent."""
+        return {field: getattr(self, field) for field in self.PAYOUT_FIELDS if getattr(self, field)}
+
+
 class Payment(models.Model):
     """Money a business pays out of its cashbook: to one of its workers (salary, allowance...) or to anyone
     else with a FluxPay wallet (a supplier, a contractor...).
@@ -123,6 +209,11 @@ class Payment(models.Model):
     worker = models.ForeignKey(
         "payroll.Worker", on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
+    # Set for payments to a saved beneficiary (a supplier, the landlord...), with their payout details then.
+    beneficiary = models.ForeignKey(
+        Beneficiary, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    )
+    beneficiary_details = models.JSONField(default=dict, blank=True)
     # Set when the payment is one line of a pay run.
     pay_run = models.ForeignKey(
         "payroll.PayRun", on_delete=models.PROTECT, null=True, blank=True, related_name="payslips"
@@ -172,6 +263,10 @@ class Payment(models.Model):
                 condition=~models.Q(type__in=["SALARY", "ALLOWANCE", "BONUS", "COMMISSION", "OTHER_WORKER"])
                 | models.Q(worker__isnull=False),
                 name="worker_payment_has_worker",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(worker__isnull=True) | models.Q(beneficiary__isnull=True),
+                name="payment_to_worker_or_beneficiary",
             ),
         ]
 

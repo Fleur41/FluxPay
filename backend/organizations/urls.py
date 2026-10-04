@@ -25,6 +25,21 @@ urlpatterns = [
         views.PaymentActionView.as_view(),
         name="org-payment-action",
     ),
+    path(
+        "organizations/<uuid:org_id>/beneficiaries/",
+        views.BeneficiaryListCreateView.as_view(),
+        name="org-beneficiaries",
+    ),
+    path(
+        "organizations/<uuid:org_id>/beneficiaries/<uuid:beneficiary_id>/",
+        views.BeneficiaryDetailView.as_view(),
+        name="org-beneficiary-detail",
+    ),
+    path(
+        "organizations/<uuid:org_id>/beneficiaries/<uuid:beneficiary_id>/verify/",
+        views.BeneficiaryVerifyView.as_view(),
+        name="org-beneficiary-verify",
+    ),
     path("organizations/<uuid:org_id>/statements/", views.OrgStatementView.as_view(), name="org-statements"),
     path("organizations/<uuid:org_id>/audit-events/", views.OrgAuditEventListView.as_view(), name="org-audit-events"),
     path("invitations/accept/", views.AcceptInvitationView.as_view(), name="invitation-accept"),

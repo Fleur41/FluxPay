@@ -114,6 +114,7 @@ def sidebar_navigation(request):
                     "organizations.payment",
                     badge="fluxpay.admin_site.badge_pending_approvals",
                 ),
+                _item("Beneficiaries", "contacts", "organizations.beneficiary"),
                 _item("Invitations", "mail", "organizations.invitation"),
                 _item("Pay runs", "payments", "payroll.payrun"),
                 _item("Workers", "badge", "payroll.worker"),

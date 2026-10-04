@@ -1,7 +1,7 @@
 """Business accounts: organizations, members, invitations and payments out of the business cashbook.
 
 Every action checks the caller's role (organizations.roles) and writes an audit event in the same
-transaction. Lock order: organization row, then payment row, then accounts, then audit.
+transaction. Lock order: organization row, then payment row, then beneficiary row, then accounts, then audit.
 """
 import hashlib
 import secrets
@@ -10,7 +10,8 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.mail import send_mail
-from django.db import IntegrityError, transaction as db_transaction
+from django.db import IntegrityError
+from django.db import transaction as db_transaction
 from django.utils import timezone
 from rest_framework import status
 
@@ -29,7 +30,8 @@ from fluxpay.exceptions import BusinessError
 from payroll.models import Worker
 from platform_settings import services as rules
 
-from .models import Invitation, Membership, Organization, Payment
+from . import beneficiaries
+from .models import Beneficiary, Invitation, Membership, Organization, Payment
 from .roles import Perm, Role, can_manage, has_perm
 
 P = Payment.Status
@@ -257,17 +259,33 @@ def cashbook(organization) -> Account:
     return wallet
 
 
-def create_payment(*, membership: Membership, type: str, amount: Decimal, note: str, idempotency_key: str,
-                   worker_id=None, destination_account_number: str = "",
+def create_payment(*, membership: Membership, amount: Decimal, note: str, idempotency_key: str, type: str = "",
+                   worker_id=None, beneficiary_id=None, destination_account_number: str = "",
                    books_category: str = "") -> tuple[Payment, bool]:
-    """Records a payment from the business cashbook: to one of its workers (the worker types) or to any
-    FluxPay account. Up to the approval threshold it is sent straight away; above it, it waits."""
+    """Records a payment from the business cashbook: to one of its workers (the worker types), to a saved
+    beneficiary (`type` defaults from its kind) or to any FluxPay account. Up to the approval threshold it is
+    sent straight away; above it, it waits."""
     user, organization = membership.user, membership.organization
     existing = Payment.objects.filter(created_by=user, idempotency_key=idempotency_key).first()
     if existing:
         return existing, False
     source = cashbook(organization)
     rules.check_amount(amount, source.currency)
+    beneficiary = None
+    if beneficiary_id:
+        beneficiary = beneficiaries.payable(organization, beneficiary_id)
+        type = type or beneficiaries.PAYMENT_TYPE[beneficiary.kind]
+        books_category = books_category or beneficiary.books_category
+        if type in Payment.WORKER_TYPES:
+            raise BusinessError("Salaries and other worker payments go to a worker, not a beneficiary.", "invalid_type")
+        if beneficiary.method != Beneficiary.Method.FLUXPAY:
+            raise BusinessError(
+                f"Paying by {beneficiary.get_method_display()} isn't available yet; only FluxPay accounts can be paid.",
+                "payout_method_unavailable",
+            )
+        destination_account_number = beneficiary.account_number
+    if not type:
+        raise BusinessError("Choose what the payment is for.", "type_required")
     worker, recipient = _recipient(organization, type, worker_id, destination_account_number)
 
     try:
@@ -277,8 +295,10 @@ def create_payment(*, membership: Membership, type: str, amount: Decimal, note: 
                 source_account=source,
                 type=type,
                 worker=worker,
+                beneficiary=beneficiary,
+                beneficiary_details=beneficiary.payout_details() if beneficiary else {},
                 destination_account_number=recipient.account_number,
-                recipient_name=holder_name(recipient),
+                recipient_name=beneficiary.name if beneficiary else holder_name(recipient),
                 amount=amount,
                 note=note,
                 books_category=books_category,
@@ -344,6 +364,9 @@ def send_payment(payment: Payment, *, actor) -> None:
     pay run is paid all or nothing. A pay run's payslips are booked as payroll, one cashbook line each.
     """
     in_run = payment.pay_run_id is not None
+    if payment.beneficiary_id:  # still verified, and still the details it was created with
+        beneficiary = Beneficiary.objects.select_for_update().get(pk=payment.beneficiary_id)  # vs. an edit right now
+        beneficiaries.check_payable(beneficiary, payment.beneficiary_details)
     transfer, _debit, _created = transfer_from_organization(
         initiator=actor,
         organization=payment.organization,
@@ -495,6 +518,7 @@ def _keep_an_owner(organization_id) -> None:
 def _payment_metadata(payment: Payment) -> dict:
     return {
         "type": payment.type,
+        **({"beneficiary": str(payment.beneficiary_id)} if payment.beneficiary_id else {}),
         "amount": str(payment.amount),
         "currency": payment.source_account.currency,
         "from": payment.source_account.account_number,
