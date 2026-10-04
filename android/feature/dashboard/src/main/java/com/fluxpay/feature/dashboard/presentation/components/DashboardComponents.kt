@@ -2,6 +2,7 @@ package com.fluxpay.feature.dashboard.presentation.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,12 +29,20 @@ import com.fluxpay.core.common.util.maskAccountNumber
 import com.fluxpay.core.domain.model.Account
 import com.fluxpay.core.ui.components.MoneyText
 
+/** Icon above label, so three actions fit side by side on a phone. */
 @Composable
 fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FilledTonalButton(onClick = onClick, modifier = modifier.height(52.dp), shape = MaterialTheme.shapes.medium) {
-        Icon(icon, contentDescription = null)
-        Spacer(Modifier.width(8.dp))
-        Text(label)
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier.height(72.dp),
+        shape = MaterialTheme.shapes.medium,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null)
+            Spacer(Modifier.height(4.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 

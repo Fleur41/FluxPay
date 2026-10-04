@@ -6,6 +6,8 @@ import java.math.BigDecimal
 
 data class DashboardSummary(
     val firstName: String,
+    /** The name shown to people paying you (Receive). */
+    val holderName: String,
     val accounts: List<Account>,
     /** Sum of the balances held in the user's preferred currency. */
     val totalBalance: BigDecimal,

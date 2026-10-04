@@ -18,6 +18,7 @@ from rest_framework import status
 
 from audit.services import record
 from banking.models import Account, Transaction
+from accounting import services as books
 from banking.services import new_reference, system_account
 from fluxpay.exceptions import BusinessError
 from platform_settings import services as rules
@@ -445,3 +446,12 @@ def _post(payment, *, debit: Account, credit: Account, debit_category, credit_ca
             description=descriptions[category],
             reference=payment.reference,
         )
+    into_wallet = credit.id == payment.account_id
+    books.book_wallet_movement(
+        role=f"provider_clearing:{payment.rail}",
+        currency=payment.currency,
+        amount=amount,
+        into_wallets=into_wallet,
+        memo=f"{descriptions[credit_category if into_wallet else debit_category]}: wallet {payment.account.account_number}",
+        reference=payment.reference,
+    )

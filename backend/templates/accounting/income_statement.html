@@ -1,0 +1,24 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    {% include "accounting/_currency_select.html" %}
+    <label>From <input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label>
+    <label>To <input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label>
+    {% include "accounting/_actions.html" %}
+</form>
+{% endblock %}
+{% block report %}
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div><h2 class="text-xl font-semibold text-important">FluxPay – Income statement</h2><div class="note">{{ start|date:"j F Y" }} to {{ end|date:"j F Y" }} · {{ currency }}</div></div>
+    <div class="scroll"><table class="fin">
+        <tr class="section"><td colspan="3">Income</td></tr>
+        {% for r in pl.income.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent"><a href="{% url 'accounting_ledger' %}?account={{ r.account.pk }}&start={{ start|date:'Y-m-d' }}&end={{ end|date:'Y-m-d' }}">{{ r.account.name }}</a></td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">No income in this period</td><td></td></tr>{% endfor %}
+        <tr class="subtotal"><td></td><td>Total income</td><td class="num">{{ pl.income.total|amount }}</td></tr>
+        <tr class="section"><td colspan="3">Expenses</td></tr>
+        {% for r in pl.expenses.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent"><a href="{% url 'accounting_ledger' %}?account={{ r.account.pk }}&start={{ start|date:'Y-m-d' }}&end={{ end|date:'Y-m-d' }}">{{ r.account.name }}</a></td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">No expenses in this period</td><td></td></tr>{% endfor %}
+        <tr class="subtotal"><td></td><td>Total expenses</td><td class="num">{{ pl.expenses.total|amount }}</td></tr>
+        <tr class="total"><td></td><td>{% if pl.profit >= 0 %}Profit{% else %}Loss{% endif %} for the period</td><td class="num">{{ pl.profit|amount }}</td></tr>
+    </table></div>
+</div>
+{% endblock %}

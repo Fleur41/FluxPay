@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.CallReceived
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.History
@@ -18,6 +19,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -33,6 +37,7 @@ import com.fluxpay.feature.dashboard.presentation.components.AccountsRow
 import com.fluxpay.feature.dashboard.presentation.components.BudgetPlannerCard
 import com.fluxpay.feature.dashboard.presentation.components.QuickAction
 import com.fluxpay.feature.dashboard.presentation.components.QuickActionsRow
+import com.fluxpay.feature.dashboard.presentation.components.ReceiveSheet
 import com.fluxpay.feature.dashboard.presentation.viewmodel.DashboardViewModel
 import java.time.LocalTime
 
@@ -47,6 +52,7 @@ fun DashboardScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val summary = state.summary
+    var showReceive by rememberSaveable { mutableStateOf(false) }
 
     if (summary == null) {
         FullScreenLoading()
@@ -107,6 +113,7 @@ fun DashboardScreen(
             item(key = "actions") {
                 QuickActionsRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { weight ->
                     QuickAction(Icons.AutoMirrored.Outlined.Send, "Send", onSendMoney, weight)
+                    QuickAction(Icons.AutoMirrored.Outlined.CallReceived, "Receive", { showReceive = true }, weight)
                     QuickAction(Icons.Outlined.History, "History", onSeeAllTransactions, weight)
                 }
             }
@@ -147,6 +154,10 @@ fun DashboardScreen(
                 )
             }
         }
+    }
+
+    if (showReceive && summary.accounts.isNotEmpty()) {
+        ReceiveSheet(holderName = summary.holderName, accounts = summary.accounts, onDismiss = { showReceive = false })
     }
 }
 

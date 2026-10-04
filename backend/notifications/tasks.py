@@ -4,13 +4,18 @@ from . import services
 
 
 @shared_task
-def alert_transfer_task(transfer_id):
-    services.alert_transfer(transfer_id)
+def alert_transfer_task(transfer_id, notify_sender=True):
+    services.alert_transfer(transfer_id, notify_sender=notify_sender)
 
 
 @shared_task
 def alert_payment_task(payment_id):
     services.alert_payment(payment_id)
+
+
+@shared_task
+def alert_adjustment_task(adjustment_id):
+    services.alert_adjustment(adjustment_id)
 
 
 @shared_task(bind=True, max_retries=services.MAX_ATTEMPTS)

@@ -1,0 +1,35 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    {% include "accounting/_currency_select.html" %}
+    <label>As at <input type="date" name="as_at" value="{{ as_at|date:'Y-m-d' }}"></label>
+    {% include "accounting/_actions.html" %}
+</form>
+{% endblock %}
+{% block report %}
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div class="report-head">
+        <div><h2 class="text-xl font-semibold text-important">FluxPay – Balance sheet</h2><div class="note">As at {{ as_at|date:"j F Y" }} · {{ currency }}</div></div>
+        {% if bs.balanced %}<span class="pill ok">Balances</span>{% else %}<span class="pill bad">Does not balance</span>{% endif %}
+    </div>
+    <div class="scroll"><table class="fin">
+        <tr class="section"><td colspan="3">Assets</td></tr>
+        {% for r in bs.assets.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent"><a href="{% url 'accounting_ledger' %}?account={{ r.account.pk }}">{{ r.account.name }}</a></td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">None yet</td><td></td></tr>{% endfor %}
+        <tr class="subtotal"><td></td><td>Total assets</td><td class="num">{{ bs.assets.total|amount }}</td></tr>
+
+        <tr class="section"><td colspan="3">Liabilities</td></tr>
+        {% for r in bs.liabilities.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent"><a href="{% url 'accounting_ledger' %}?account={{ r.account.pk }}">{{ r.account.name }}</a>
+            {% if r.account.role == "customer_funds" and safeguarding %}<div class="note">Personal wallets {{ safeguarding.personal_wallets|amount }} · Business wallets {{ safeguarding.business_wallets|amount }}</div>{% endif %}</td><td class="num">{{ r.amount|amount }}</td></tr>{% empty %}<tr class="muted"><td></td><td class="indent">None yet</td><td></td></tr>{% endfor %}
+        <tr class="subtotal"><td></td><td>Total liabilities</td><td class="num">{{ bs.liabilities.total|amount }}</td></tr>
+
+        <tr class="section"><td colspan="3">Equity</td></tr>
+        {% for r in bs.equity.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent"><a href="{% url 'accounting_ledger' %}?account={{ r.account.pk }}">{{ r.account.name }}</a></td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
+        {% for name, value in bs.equity.extra %}<tr class="row"><td class="code"></td><td class="indent"><a href="{% url 'accounting_income_statement' %}?currency={{ currency }}&start=2000-01-01&end={{ as_at|date:'Y-m-d' }}">{{ name }}</a></td><td class="num">{{ value|amount }}</td></tr>{% endfor %}
+        <tr class="subtotal"><td></td><td>Total equity</td><td class="num">{{ bs.equity.total|amount }}</td></tr>
+
+        <tr class="total"><td></td><td>Total liabilities and equity</td><td class="num">{{ bs.liabilities_and_equity|amount }}</td></tr>
+    </table></div>
+    <p class="note">Customer wallet balances are money FluxPay owes its customers. Negative figures are shown in brackets.</p>
+</div>
+{% endblock %}

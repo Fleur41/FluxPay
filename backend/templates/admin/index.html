@@ -1,0 +1,127 @@
+{% extends 'admin/base.html' %}
+{% load i18n unfold %}
+{% comment %}FluxPay back-office home. Figures come from fluxpay.admin_site.dashboard_callback.{% endcomment %}
+
+{% block title %}Dashboard | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-8">
+
+    {# Greeting and the one action staff use most #}
+    <div class="flex flex-col gap-4 md:flex-row md:items-center justify-between">
+        <div class="flex flex-col gap-1">
+            {% component "unfold/components/title.html" %}{{ greeting }}, {{ request.user.full_name|default:request.user.email }}{% endcomponent %}
+            {% component "unfold/components/text.html" %}Here is FluxPay at a glance. Anything that needs a person is listed under “Needs attention”.{% endcomponent %}
+        </div>
+        <div class="flex flex-row flex-wrap gap-2 shrink-0">
+            {% if can_record_cashbook %}
+                {% component "unfold/components/button.html" with href=cashbook_add_url size="md" %}
+                    <span class="material-symbols-outlined">account_balance</span> Record money in the bank
+                {% endcomponent %}
+            {% endif %}
+            {% if can_post_adjustment %}
+                {% component "unfold/components/button.html" with href=adjustment_add_url size="md" variant="default" %}
+                    <span class="material-symbols-outlined">add_card</span> Top up a wallet
+                {% endcomponent %}
+            {% endif %}
+        </div>
+    </div>
+
+    {# Key figures #}
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {% for kpi in kpis %}
+            {% component "unfold/components/card.html" %}
+                {% component "unfold/components/text.html" %}{{ kpi.title }}{% endcomponent %}
+                {% component "unfold/components/title.html" with class="mt-1 mb-2" %}{{ kpi.value }}{% endcomponent %}
+                {% component "unfold/components/text.html" with class="text-xs truncate" %}{{ kpi.footer }}{% endcomponent %}
+            {% endcomponent %}
+        {% endfor %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="flex flex-col gap-6 lg:col-span-2">
+            {% if can.balances %}
+            {% component "unfold/components/card.html" with title="Customer money held" %}
+                {% if balances_table.rows %}
+                    {% component "unfold/components/table.html" with table=balances_table card_included=1 striped=1 %}{% endcomponent %}
+                {% else %}
+                    {% component "unfold/components/text.html" %}No customer wallets yet.{% endcomponent %}
+                {% endif %}
+            {% endcomponent %}
+            {% endif %}
+
+            {% if can.adjustments %}
+            {% component "unfold/components/card.html" with title="Recent top-ups & corrections" %}
+                {% if adjustments_table.rows %}
+                    {% component "unfold/components/table.html" with table=adjustments_table card_included=1 striped=1 %}{% endcomponent %}
+                {% else %}
+                    {% component "unfold/components/text.html" %}No staff adjustments yet.{% if can_post_adjustment %} Use “Top up a wallet” to add money to a customer’s wallet.{% endif %}{% endcomponent %}
+                {% endif %}
+            {% endcomponent %}
+            {% endif %}
+        </div>
+
+        <div class="flex flex-col gap-6">
+            {% if attention %}
+            {% component "unfold/components/card.html" with title="Needs attention" %}
+                <div class="flex flex-col gap-3">
+                    {% for item in attention %}
+                        <a href="{{ item.link }}" class="flex flex-row items-center justify-between gap-3">
+                            <span class="text-sm">{{ item.title }}</span>
+                            {% if item.count %}
+                                {% include "unfold/helpers/label.html" with text=item.count type="warning" %}
+                            {% else %}
+                                {% include "unfold/helpers/label.html" with text="0" type="success" %}
+                            {% endif %}
+                        </a>
+                    {% endfor %}
+                    {% if not attention_total %}
+                        {% component "unfold/components/text.html" with class="text-xs mt-1" %}All clear: nothing is waiting on staff.{% endcomponent %}
+                    {% endif %}
+                </div>
+            {% endcomponent %}
+            {% endif %}
+
+            {% for sg in safeguarding %}
+            {% component "unfold/components/card.html" with title="Customer money "|add:sg.currency %}
+                <div class="flex flex-col gap-3">
+                    <div class="flex flex-row items-center justify-between gap-3">
+                        <span class="text-sm">Backed by the bank</span>
+                        {% if sg.backed %}
+                            {% include "unfold/helpers/label.html" with text="Fully backed" type="success" %}
+                        {% else %}
+                            {% include "unfold/helpers/label.html" with text="Shortfall" type="danger" %}
+                        {% endif %}
+                    </div>
+                    <div class="flex flex-row justify-between text-sm"><span>In the bank</span><span>{{ sg.held|floatformat:"2g" }}</span></div>
+                    <div class="flex flex-row justify-between text-sm"><span>Owed to customers</span><span>{{ sg.owed|floatformat:"2g" }}</span></div>
+                    <div class="flex flex-row justify-between text-sm font-semibold"><span>{% if sg.backed %}Surplus{% else %}Shortfall{% endif %}</span><span>{{ sg.surplus|floatformat:"2g" }}</span></div>
+                    {% component "unfold/components/link.html" with href=reports_url icon="monitoring" %}Financial reports{% endcomponent %}
+                </div>
+            {% endcomponent %}
+            {% endfor %}
+
+            {% if can.audit %}
+            {% component "unfold/components/card.html" with title="Audit log" %}
+                <div class="flex flex-col gap-3">
+                    <div class="flex flex-row items-center justify-between gap-3">
+                        <span class="text-sm">Tamper check</span>
+                        {% if audit_ok %}
+                            {% include "unfold/helpers/label.html" with text="Intact" type="success" %}
+                        {% else %}
+                            {% include "unfold/helpers/label.html" with text="Broken: investigate" type="danger" %}
+                        {% endif %}
+                    </div>
+                    {% component "unfold/components/text.html" with class="text-xs" %}Every login, money movement and staff action is recorded and chained, so edits or deletions are detected.{% endcomponent %}
+                    {% component "unfold/components/link.html" with href=audit_url icon="policy" %}Open the audit log{% endcomponent %}
+                </div>
+            {% endcomponent %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

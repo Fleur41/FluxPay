@@ -55,6 +55,10 @@ class PlatformSettings(models.Model):
     invitation_expiry_days = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(90)], help_text="How long a business invitation link works."
     )
+    payroll_reversal_days = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(90)],
+        help_text="How many days after payday a business may take back a salary paid in error.",
+    )
     session_timeout_minutes = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(120)],
         help_text="The app signs the user out after this much inactivity.",

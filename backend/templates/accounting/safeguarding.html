@@ -1,0 +1,37 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    {% include "accounting/_currency_select.html" %}
+    <button type="submit" class="font-medium inline-flex items-center rounded-default px-3 py-2 bg-primary-600 text-white">Show</button>
+    <button type="button" onclick="window.print()" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 border border-base-200 dark:border-base-700"><span class="material-symbols-outlined">print</span> Print</button>
+</form>
+{% endblock %}
+{% block report %}
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div class="report-head">
+        <div><h2 class="text-xl font-semibold text-important">Safeguarding check – {{ currency }}</h2><div class="note">Right now. Is every shilling customers can spend backed by money in a customer funds bank account?</div></div>
+        {% if sg.backed %}<span class="pill ok">Fully backed</span>{% else %}<span class="pill bad">Shortfall</span>{% endif %}
+    </div>
+    <div class="scroll"><table class="fin">
+        <tr class="section"><td colspan="2">Held in customer funds (safeguarding) bank accounts</td></tr>
+        {% for b in sg.banks %}<tr class="row"><td class="indent"><a href="{% url 'accounting_cashbook' %}?bank={{ b.bank.pk }}">{{ b.bank.name }}</a></td><td class="num">{{ b.balance|amount }}</td></tr>{% empty %}<tr class="muted"><td class="indent">No safeguarding bank account yet</td><td></td></tr>{% endfor %}
+        <tr class="subtotal"><td>Total held</td><td class="num">{{ sg.held|amount }}</td></tr>
+        <tr class="section"><td colspan="2">Owed to customers</td></tr>
+        <tr class="row"><td class="indent">Wallet balances (2000)</td><td class="num">{{ sg.customer_funds|amount }}</td></tr>
+        <tr class="row"><td class="indent">Customer receipts not yet credited to a wallet (2100)</td><td class="num">{{ sg.unallocated|amount }}</td></tr>
+        <tr class="subtotal"><td>Total owed</td><td class="num">{{ sg.owed|amount }}</td></tr>
+        <tr class="total"><td>{% if sg.backed %}Surplus{% else %}Shortfall: the owners must pay this into a customer funds account{% endif %}</td><td class="num">{{ sg.surplus|amount }}</td></tr>
+    </table></div>
+
+    <h3 class="font-semibold text-important mt-4">Wallets agree with the books?</h3>
+    <div class="scroll"><table class="fin">
+        <tr class="row"><td>Personal wallets</td><td class="num">{{ sg.personal_wallets|amount }}</td></tr>
+        <tr class="row"><td>Business wallets</td><td class="num">{{ sg.business_wallets|amount }}</td></tr>
+        <tr class="subtotal"><td>Total of all wallets (sub-ledger)</td><td class="num">{{ sg.wallets_total|amount }}</td></tr>
+        <tr class="row"><td>Customer wallet balances in the general ledger (2000)</td><td class="num">{{ sg.customer_funds|amount }}</td></tr>
+        <tr class="total"><td>Difference {% if sg.subledger_difference == 0 %}<span class="pill ok">Agrees</span>{% else %}<span class="pill bad">Investigate</span>{% endif %}</td><td class="num">{{ sg.subledger_difference|amount }}</td></tr>
+    </table></div>
+    {% if not sg.backed %}<p class="note">To fix a shortfall: pay money into the customer funds bank account and record it in the cashbook as “Owner's capital”.</p>{% endif %}
+</div>
+{% endblock %}

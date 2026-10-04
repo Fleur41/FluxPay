@@ -21,7 +21,7 @@ data class Account(
 
 enum class TransactionType { CREDIT, DEBIT }
 
-enum class TransactionCategory { TRANSFER_IN, TRANSFER_OUT, BONUS, DEPOSIT, WITHDRAWAL, WITHDRAWAL_REVERSAL, UNKNOWN }
+enum class TransactionCategory { TRANSFER_IN, TRANSFER_OUT, BONUS, DEPOSIT, WITHDRAWAL, WITHDRAWAL_REVERSAL, ADJUSTMENT, UNKNOWN }
 
 enum class TransactionStatus { PENDING, COMPLETED, FAILED, UNKNOWN }
 

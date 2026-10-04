@@ -22,7 +22,9 @@ FluxPay/
 | **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
 | **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
 | **Business accounts** | Organizations with members, invitations, shared wallets, payment requests that need approval, and an audit log (API) |
+| **Receive** | Share your name and account number from the dashboard so people can pay you |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
+| **Admin dashboard** | Staff back-office at `/admin/`: KPIs, customer balances, wallet top-ups and corrections, business oversight, alerts, audit log and platform rules ([guide](#admin-dashboard)) |
 | **Security** | Encrypted tokens (Android Keystore AES-GCM), 5-minute inactivity timeout, FLAG_SECURE, no backups, HTTPS-only outside dev, R8 |
 
 ## Android architecture
@@ -96,7 +98,7 @@ python manage.py runserver 0.0.0.0:8000
 python manage.py test
 ```
 
-Business rules are data, not code: staff set the currencies (with each one's per-transaction minimum and maximum and an optional signup bonus), the default currency, statement range, invitation expiry, the app's inactivity timeout and the budget guideline in Django admin under **Platform settings**. Every change is audited, and the app reads them from `GET /api/v1/config/`. New wallets start at 0; a signup bonus, when staff set one, is paid from a system Promotions account so the ledger always balances.
+Business rules are data, not code: staff set the currencies (with each one's per-transaction minimum and maximum and an optional signup bonus), the default currency, statement range, invitation expiry, the app's inactivity timeout and the budget guideline in the [admin dashboard](#admin-dashboard) under **Settings → Platform rules**. Every change is audited, and the app reads them from `GET /api/v1/config/`. New wallets start at 0; a signup bonus, when staff set one, is paid from a system Promotions account so the ledger always balances.
 
 ### 2. Android
 
@@ -200,6 +202,95 @@ cp android/keystore.properties.example android/keystore.properties   # then fill
 ```
 
 Both files are git-ignored. Without them, release builds are signed with the debug key (fine for CI, not for Play).
+
+## Admin dashboard
+
+FluxPay's back-office is Django admin, styled with [Unfold](https://unfoldadmin.com/) in the app's purple. Staff use it to watch the platform, help customers and change business rules without a code release.
+
+### Open it
+
+```bash
+cd backend
+docker compose exec api python manage.py createsuperuser    # or: python manage.py createsuperuser
+```
+
+Then go to **http://localhost:8000/admin/** and sign in with that email and password. In production it is `https://<api-host>/admin/`. Customer accounts can't sign in here; only users marked **Staff** can.
+
+A label next to the FluxPay name shows **Development** (yellow) or **Production** (red), so you always know which system you are changing. Press **Cmd/Ctrl + K** to jump to any screen or record.
+
+### The home page
+
+| Panel | Shows |
+|---|---|
+| **Active customers** | Customer count, and how many joined in the last 7 days |
+| **Transfers today** | Number of transfers since midnight, and the volume per currency |
+| **Top-ups today** | Staff top-ups and corrections posted today |
+| **Failed transactions (7 days)** | Held payouts that were returned |
+| **Customer money held** | Total balance and wallet count per currency (FluxPay's own system accounts excluded) |
+| **Needs attention** | Business payments waiting for approval, external payments flagged for review, alerts that failed to send. Each links to the filtered list |
+| **Audit log** | Tamper check: confirms no audit record has been altered or removed |
+| **Recent top-ups & corrections** | The last six, with who posted them |
+
+Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Payment approvals**, **Payments** and **Email & SMS alerts** when something is waiting.
+
+### What each screen is for
+
+| Sidebar | Screen | Staff can |
+|---|---|---|
+| Customers | **People** | Search by email, name or phone; filter by staff, active or join date; deactivate a user |
+| | **Wallets** | Look up any wallet by number, owner or business, with balance and status |
+| Money | **Top-ups & corrections** | Add money to a wallet or take it back (see below) |
+| | **Transactions** | Every ledger line, filterable by type, category, status and date; search by reference |
+| | **Transfers** | Every customer-to-customer transfer |
+| Businesses | **Businesses** | Suspend or reactivate a business; see its members and approval threshold |
+| | **Payment approvals** | Business payments and their approval status. Approving is done by the business's own approvers in the app, not by staff |
+| | **Invitations** | Pending, accepted and expired invitations |
+| External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review** |
+| | **Provider callbacks** | Raw callbacks received from providers, and what happened to each |
+| Alerts & compliance | **Email & SMS alerts** | Every alert sent, filterable by channel, event and status (use **Failed** to find problems) |
+| | **Audit log** | Who did what and when, across the app and the admin |
+| Settings | **Platform rules** | Default currency, statement range, invitation expiry, app inactivity timeout, budget guideline |
+| | **Currencies & limits** | Enable or disable currencies; set per-transaction minimum and maximum and the signup bonus |
+| | **Staff groups** | Roles for staff members (see below) |
+
+Wallets, transactions, transfers, payments, alerts and the audit log are **view-only**: money only moves through the app's services, so staff can't edit or delete ledger records. Businesses can't be created or deleted here either; customers create them in the app.
+
+### Top up or correct a wallet
+
+Use this for cash a customer paid in at an office, or to fix a mistake.
+
+1. Go to **Money → Top-ups & corrections → Add**.
+2. Pick the wallet, then choose **Top-up (add money)** or **Correction (take money back)**.
+3. Enter the amount and a reason of at least 10 characters, e.g. *"Cash deposited at the Nairobi office, receipt 1042"*.
+4. Save. The wallet changes immediately and the customer gets an email/SMS alert.
+
+Rules:
+- The currency's per-transaction limits apply, which guards against an extra zero.
+- A correction can't take a wallet below zero.
+- Adjustments can't be edited or deleted. To undo one, post the opposite adjustment.
+- Every adjustment is double-entry against a **Manual adjustments** system account, so the ledger always balances, and it appears in the customer's history as *Adjustment by FluxPay*.
+
+### Change business rules
+
+- **Settings → Platform rules:** There is one settings record; the link opens it directly. The budget guideline's three percentages must add up to 100.
+- **Settings → Currencies & limits:** Edit a currency's limits or signup bonus, or untick **Enabled** to stop new use. Currencies can't be deleted, because wallets refer to them. Keep the signup bonus at 0 unless you're running a promotion.
+
+Changes apply straight away: the app reads them from `GET /api/v1/config/` the next time it loads. Each change is written to the audit log with the old and new values.
+
+### Give staff access
+
+Don't give everyone superuser. Instead:
+
+1. **Settings → Staff groups → Add**, e.g. *Support* (view permissions on people, wallets, transactions, alerts) or *Finance* (add **Can top up or correct customer wallets**, plus view on adjustments and wallets).
+2. **Customers → People**, open the person, tick **Staff status**, and add them to the group. Leave **Superuser status** off.
+
+Only users with the **Can top up or correct customer wallets** permission can post adjustments.
+
+### Production notes
+
+- The admin's styles are served by the API itself (WhiteNoise); the Docker image runs `collectstatic` on start, so there is nothing else to host.
+- Create the first superuser on the server with `docker run … ghcr.io/fleur41/fluxpay-api python manage.py createsuperuser`, or the equivalent for your host.
+- `/admin/` is public on the internet. Use strong passwords, and consider limiting it by IP at your proxy.
 
 ## API
 

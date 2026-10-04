@@ -1,0 +1,17 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<form method="post" class="flex flex-col gap-4" style="max-width: 640px">
+    {% csrf_token %}
+    <p>This posts an opposite entry dated today, so {{ entry.number }} and its reversal cancel out. Nothing is deleted: both stay in the books and the audit log.</p>
+    <div class="flex flex-col gap-2">
+        <label for="id_reason" class="font-semibold">Reason</label>
+        {{ form.reason }}
+        {% for error in form.reason.errors %}<p class="text-red-600 text-sm">{{ error }}</p>{% endfor %}
+        <p class="text-sm" style="color: var(--color-base-500)">{{ form.reason.help_text }}</p>
+    </div>
+    <div class="flex gap-2">
+        <button type="submit" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-red-600 text-white"><span class="material-symbols-outlined">undo</span> Reverse {{ entry.number }}</button>
+        <a href="{{ back }}" class="font-medium inline-flex items-center rounded-default px-3 py-2 border border-base-200 dark:border-base-700">Cancel</a>
+    </div>
+</form>
+{% endblock %}

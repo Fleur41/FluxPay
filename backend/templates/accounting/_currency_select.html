@@ -1,0 +1,3 @@
+<label>Currency
+    <select name="currency">{% for c in currencies %}<option value="{{ c }}" {% if c == currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+</label>

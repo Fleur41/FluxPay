@@ -221,7 +221,8 @@ def remove_member(*, membership: Membership, target_id) -> Membership:
 
 
 def create_payment_request(*, membership: Membership, source_account_id, destination_account_number: str,
-                           amount: Decimal, note: str, idempotency_key: str) -> tuple[PaymentRequest, bool]:
+                           amount: Decimal, note: str, idempotency_key: str,
+                           books_category: str = "suppliers") -> tuple[PaymentRequest, bool]:
     """Records a payment. Up to the approval threshold it is sent straight away; above it, it waits."""
     user, organization = membership.user, membership.organization
     existing = PaymentRequest.objects.filter(created_by=user, idempotency_key=idempotency_key).first()
@@ -244,6 +245,7 @@ def create_payment_request(*, membership: Membership, source_account_id, destina
                 destination_account_number=destination_account_number,
                 amount=amount,
                 note=note,
+                books_category=books_category,
                 status=PR.PENDING_APPROVAL,
                 created_by=user,
                 idempotency_key=idempotency_key,
@@ -314,6 +316,7 @@ def _execute(request: PaymentRequest) -> None:
             amount=request.amount,
             note=request.note,
             idempotency_key=f"payment-request-{request.id}",
+            books_role=request.books_category or None,
         )
     except BusinessError as exc:
         request.status, request.failure_reason = PR.FAILED, str(exc.detail)[:255]

@@ -1,0 +1,39 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block content %}
+<div class="flex flex-col gap-8">
+    <div class="flex flex-col gap-1">
+        <h2 class="text-2xl font-semibold text-important">Financial reports</h2>
+        <p class="note">Built from the general ledger. Every figure can be downloaded for Excel or printed.</p>
+    </div>
+
+    {% for sg in safeguarding %}
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-3">
+        <div class="report-head">
+            <h3 class="font-semibold text-important">Customer money – {{ sg.currency }}</h3>
+            {% if sg.backed %}<span class="pill ok">Fully backed by the bank</span>{% else %}<span class="pill bad">Shortfall {{ sg.currency }} {{ sg.surplus|amount }}</span>{% endif %}
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div><div class="note">In customer funds bank accounts</div><div class="text-xl font-semibold">{{ sg.currency }} {{ sg.held|amount }}</div></div>
+            <div><div class="note">Owed to customers (wallets + unallocated receipts)</div><div class="text-xl font-semibold">{{ sg.currency }} {{ sg.owed|amount }}</div></div>
+            <div><div class="note">{% if sg.backed %}Surplus{% else %}Shortfall to fund{% endif %}</div><div class="text-xl font-semibold">{{ sg.currency }} {{ sg.surplus|amount }}</div></div>
+        </div>
+        <a class="text-primary-600 text-sm" href="{% url 'accounting_safeguarding' %}?currency={{ sg.currency }}">See the safeguarding check →</a>
+    </div>
+    {% empty %}
+    <div class="border border-base-200 dark:border-base-800 rounded-default p-6">
+        <p>No books yet. Start by adding FluxPay's bank account under <a class="text-primary-600" href="{% url 'admin:accounting_bankaccount_add' %}">Accounting → Bank accounts</a>, then record money in the <a class="text-primary-600" href="{% url 'admin:accounting_cashbookentry_changelist' %}">Cashbook</a>.</p>
+    </div>
+    {% endfor %}
+
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        {% include "accounting/_card.html" with url_name="accounting_balance_sheet" icon="balance" title="Balance sheet" text="What FluxPay owns and owes on any date: bank, customer money, owners' equity." %}
+        {% include "accounting/_card.html" with url_name="accounting_income_statement" icon="trending_up" title="Income statement" text="Income less expenses for a period: profit or loss." %}
+        {% include "accounting/_card.html" with url_name="accounting_trial_balance" icon="rule" title="Trial balance" text="Every account's balance; debits must equal credits." %}
+        {% include "accounting/_card.html" with url_name="accounting_ledger" icon="menu_book" title="General ledger" text="Every posting to one account, with a running balance." %}
+        {% include "accounting/_card.html" with url_name="accounting_cashbook" icon="account_balance" title="Cashbook" text="Money in and out of each bank account, with a running balance." %}
+        {% include "accounting/_card.html" with url_name="accounting_reconcile" icon="fact_check" title="Bank reconciliation" text="Match the cashbook to the bank statement and sign it off." %}
+        {% include "accounting/_card.html" with url_name="accounting_business" icon="storefront" title="Business books" text="Each business's own cashbook, profit and loss and balance sheet." %}
+    </div>
+</div>
+{% endblock %}

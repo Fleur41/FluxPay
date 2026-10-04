@@ -1,0 +1,37 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    <label>Bank account
+        <select name="bank">{% for b in banks %}<option value="{{ b.pk }}" {% if bank and b.pk == bank.pk %}selected{% endif %}>{{ b.name }} ({{ b.currency }})</option>{% endfor %}</select>
+    </label>
+    <label>From <input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label>
+    <label>To <input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label>
+    {% if bank %}{% include "accounting/_actions.html" %}{% endif %}
+</form>
+{% endblock %}
+{% block report %}
+{% if bank %}
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
+    <div class="report-head">
+        <div><h2 class="text-xl font-semibold text-important">Cashbook – {{ bank.name }}</h2><div class="note">{{ bank.bank_name }} {{ bank.account_number }} · {{ bank.currency }} · {{ start|date:"j M Y" }} to {{ end|date:"j M Y" }}</div></div>
+        <div class="flex gap-2 no-print">
+            <a class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-primary-600 text-white" href="{% url 'admin:accounting_cashbookentry_add' %}?bank_account={{ bank.pk }}"><span class="material-symbols-outlined">add</span> Record money in or out</a>
+        </div>
+    </div>
+    <div class="scroll"><table class="fin">
+        <tr><th>Date</th><th>Number</th><th>Details</th><th class="num">Money in</th><th class="num">Money out</th><th class="num">Balance</th></tr>
+        <tr class="muted"><td></td><td></td><td>Opening balance</td><td></td><td></td><td class="num">{{ cb.opening|amount }}</td></tr>
+        {% for r in cb.rows %}{% with e=r.entry %}
+        <tr class="row"><td>{{ e.date|date:"d M Y" }}</td><td><a href="{% url 'admin:accounting_cashbookentry_change' e.pk %}">{{ e.number }}</a></td>
+            <td>{{ e.counterparty }} <span class="note">· {{ e.get_category_display }}{% if e.bank_reference %} · {{ e.bank_reference }}{% endif %}</span>
+                {% if e.category == "CUSTOMER_DEPOSIT" and not e.is_reversed and e.unallocated %}<span class="pill warn">{{ e.unallocated|amount }} to credit</span>{% endif %}</td>
+            <td class="num">{% if e.direction == "RECEIPT" %}{{ e.amount|amount }}{% endif %}</td><td class="num">{% if e.direction == "PAYMENT" %}{{ e.amount|amount }}{% endif %}</td><td class="num">{{ r.balance|amount }}</td></tr>
+        {% endwith %}{% empty %}<tr class="muted"><td></td><td></td><td>No entries in this period.</td><td></td><td></td><td></td></tr>{% endfor %}
+        <tr class="total"><td></td><td></td><td>Closing balance</td><td class="num">{{ cb.receipts|amount }}</td><td class="num">{{ cb.payments|amount }}</td><td class="num">{{ cb.closing|amount }}</td></tr>
+    </table></div>
+</div>
+{% else %}
+<p>No bank accounts yet. <a class="text-primary-600" href="{% url 'admin:accounting_bankaccount_add' %}">Add FluxPay's bank account</a> to start the cashbook.</p>
+{% endif %}
+{% endblock %}

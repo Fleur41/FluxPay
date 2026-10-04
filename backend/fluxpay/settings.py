@@ -30,6 +30,9 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,10.0.2.2")
 
 INSTALLED_APPS = [
+    # Unfold styles the staff back-office; it must come before django.contrib.admin.
+    "unfold",
+    "unfold.contrib.filters",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -50,10 +53,14 @@ INSTALLED_APPS = [
     "audit",
     "notifications",
     "platform_settings",
+    "accounting",
+    "payroll",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves collected static files (admin styles) from gunicorn, with caching and compression.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -69,7 +76,7 @@ ROOT_URLCONF = "fluxpay.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],  # admin/index.html: the back-office dashboard
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -109,6 +116,15 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # Hashed file names + gzip/brotli, so browsers can cache styles forever and still get updates.
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        if not DEBUG
+        else "django.contrib.staticfiles.storage.StaticFilesStorage"
+    },
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
@@ -196,3 +212,39 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Staff back-office (Django admin themed by Unfold). Navigation and dashboard live in fluxpay/admin_site.py.
+UNFOLD = {
+    "SITE_TITLE": "FluxPay Admin",
+    "SITE_HEADER": "FluxPay",
+    "SITE_SUBHEADER": "Back-office",
+    "SITE_SYMBOL": "account_balance_wallet",
+    "SITE_URL": None,
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SHOW_BACK_BUTTON": True,
+    "ENVIRONMENT": "fluxpay.admin_site.environment_callback",
+    "DASHBOARD_CALLBACK": "fluxpay.admin_site.dashboard_callback",
+    "COMMAND": {"search_models": True},  # Cmd/Ctrl+K jumps to any screen
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": "fluxpay.admin_site.sidebar_navigation",
+    },
+    # FluxPay brand purple (the app's #4F3BD8), as an OKLCH scale.
+    "COLORS": {
+        "primary": {
+            "50": "oklch(97% .016 280)",
+            "100": "oklch(94% .035 280)",
+            "200": "oklch(88% .07 280)",
+            "300": "oklch(79% .12 279)",
+            "400": "oklch(67% .19 277)",
+            "500": "oklch(57% .23 275)",
+            "600": "oklch(50% .24 273)",
+            "700": "oklch(44% .22 273)",
+            "800": "oklch(37% .18 274)",
+            "900": "oklch(31% .14 275)",
+            "950": "oklch(22% .1 276)",
+        },
+    },
+}

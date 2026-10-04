@@ -1,0 +1,78 @@
+{% extends 'accounting/_base.html' %}
+{% load books %}
+{% block filters %}
+<form method="get" class="filters">
+    <label>Bank account
+        <select name="bank"><option value="">Choose</option>{% for b in banks %}<option value="{{ b.pk }}" {% if bank and b.pk == bank.pk %}selected{% endif %}>{{ b.name }} ({{ b.currency }})</option>{% endfor %}</select>
+    </label>
+    <label>Statement date <input type="date" name="statement_date" value="{{ statement_date|date:'Y-m-d' }}"></label>
+    <label>Closing balance on the statement <input type="text" inputmode="decimal" name="statement_balance" value="{{ statement_balance }}" placeholder="e.g. 125,400.00"></label>
+    <button type="submit" class="font-medium inline-flex items-center rounded-default px-3 py-2 bg-primary-600 text-white">Start</button>
+</form>
+{% endblock %}
+{% block report %}
+{% if bank %}
+<form method="post" class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4" id="rec">
+    {% csrf_token %}
+    <input type="hidden" name="bank" value="{{ bank.pk }}">
+    <input type="hidden" name="statement_date" value="{{ statement_date|date:'Y-m-d' }}">
+    <input type="hidden" name="statement_balance" value="{{ statement_balance }}">
+    <div>
+        <h2 class="text-xl font-semibold text-important">Reconcile {{ bank.name }} at {{ statement_date|date:"j F Y" }}</h2>
+        <p class="note">Tick every entry that appears on the bank statement. What is left unticked is money in transit. The difference must be zero to sign off.</p>
+    </div>
+    <div class="scroll"><table class="fin">
+        <tr><th></th><th>Date</th><th>Number</th><th>Details</th><th class="num">Money in</th><th class="num">Money out</th></tr>
+        {% for e in entries %}
+        <tr class="row"><td><input type="checkbox" name="cleared" value="{{ e.pk }}" data-signed="{{ e.signed_amount }}" {% if e.pk|stringformat:"s" in ticked %}checked{% endif %}></td>
+            <td>{{ e.date|date:"d M Y" }}</td><td>{{ e.number }}</td><td>{{ e.counterparty }} <span class="note">· {{ e.get_category_display }}{% if e.bank_reference %} · {{ e.bank_reference }}{% endif %}</span></td>
+            <td class="num">{% if e.direction == "RECEIPT" %}{{ e.amount|amount }}{% endif %}</td><td class="num">{% if e.direction == "PAYMENT" %}{{ e.amount|amount }}{% endif %}</td></tr>
+        {% empty %}<tr class="muted"><td></td><td colspan="5">Every cashbook entry up to this date is already matched to a statement.</td></tr>{% endfor %}
+    </table></div>
+
+    <table class="fin" style="max-width: 560px">
+        <tr class="row"><td>Balance per bank statement</td><td class="num" id="r-statement">{{ statement_balance|default:"–" }}</td></tr>
+        <tr class="row"><td>Add: money in not yet on the statement</td><td class="num" id="r-receipts">0.00</td></tr>
+        <tr class="row"><td>Less: money out not yet on the statement</td><td class="num" id="r-payments">0.00</td></tr>
+        <tr class="subtotal"><td>Adjusted bank balance</td><td class="num" id="r-adjusted">–</td></tr>
+        <tr class="row"><td>Balance per cashbook</td><td class="num">{{ cashbook_balance|amount }}</td></tr>
+        <tr class="total"><td>Difference</td><td class="num" id="r-diff">–</td></tr>
+    </table>
+    <div class="flex items-center gap-3">
+        <button type="submit" id="r-save" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-primary-600 text-white" {% if not statement_balance %}disabled{% endif %}><span class="material-symbols-outlined">verified</span> Sign off reconciliation</button>
+        <span class="note" id="r-hint">{% if not statement_balance %}Enter the statement's closing balance above first.{% endif %}</span>
+    </div>
+</form>
+<script>
+(function () {
+  const form = document.getElementById("rec");
+  const statementRaw = "{{ statement_balance|escapejs }}".replace(/,/g, "");
+  const cashbook = {{ cashbook_balance|default:0|stringformat:"s" }};
+  const cents = (v) => Math.round(parseFloat(v) * 100);
+  const fmt = (c) => { const s = (Math.abs(c) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}); return c < 0 ? "(" + s + ")" : s; };
+  function update() {
+    let receipts = 0, payments = 0;
+    form.querySelectorAll("input[name=cleared]").forEach((box) => {
+      if (box.checked) return;  // unticked = not on the statement yet
+      const c = cents(box.dataset.signed);
+      if (c > 0) receipts += c; else payments -= c;
+    });
+    document.getElementById("r-receipts").textContent = fmt(receipts);
+    document.getElementById("r-payments").textContent = fmt(payments);
+    if (statementRaw === "" || isNaN(parseFloat(statementRaw))) return;
+    const adjusted = cents(statementRaw) + receipts - payments;
+    const diff = adjusted - Math.round(cashbook * 100);
+    document.getElementById("r-statement").textContent = fmt(cents(statementRaw));
+    document.getElementById("r-adjusted").textContent = fmt(adjusted);
+    document.getElementById("r-diff").textContent = fmt(diff);
+    document.getElementById("r-save").disabled = diff !== 0;
+    document.getElementById("r-hint").textContent = diff === 0 ? "Reconciled to the cent." : "Out by " + fmt(diff) + ". Check the ticks, bank charges and interest.";
+  }
+  form.addEventListener("change", update);
+  update();
+})();
+</script>
+{% else %}
+<p class="note">Choose a bank account, then enter the date and closing balance from its statement.</p>
+{% endif %}
+{% endblock %}
