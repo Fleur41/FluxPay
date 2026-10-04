@@ -2,6 +2,8 @@ package com.fluxpay.feature.settings.presentation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,8 +15,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -39,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fluxpay.core.common.util.Constants
 import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.ui.components.Avatar
 import com.fluxpay.core.ui.components.FluxSecondaryButton
@@ -47,7 +50,7 @@ import com.fluxpay.feature.settings.presentation.components.SettingsRow
 import com.fluxpay.feature.settings.presentation.components.SettingsSection
 import com.fluxpay.feature.settings.presentation.viewmodel.SettingsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -80,13 +83,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 
             SettingsSection("Money") {
                 SettingsRow(Icons.Outlined.Payments, "Preferred currency", "Used for your dashboard total")
-                Row(
+                FlowRow(
                     Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Constants.SUPPORTED_CURRENCIES.forEach { code ->
+                    state.currencies.forEach { code ->
                         FilterChip(
-                            selected = state.preferences.currency == code,
+                            selected = state.selectedCurrency == code,
                             onClick = { viewModel.setCurrency(code) },
                             label = { Text(code) },
                         )
@@ -98,6 +101,46 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     subtitle = "Mask amounts across the app",
                 ) {
                     Switch(checked = state.preferences.hideBalances, onCheckedChange = viewModel::setHideBalances)
+                }
+            }
+
+            SettingsSection("Transaction alerts") {
+                SettingsRow(
+                    icon = Icons.Outlined.Email,
+                    title = "Email alerts",
+                    subtitle = state.user?.email ?: "Every payment in or out",
+                ) {
+                    Switch(
+                        checked = state.alerts.emailEnabled == true,
+                        onCheckedChange = viewModel::setEmailAlerts,
+                        enabled = state.alerts.emailEnabled != null,
+                    )
+                }
+                SettingsRow(
+                    icon = Icons.Outlined.Sms,
+                    title = "SMS alerts",
+                    subtitle = state.user?.phoneNumber?.takeIf { it.isNotBlank() }
+                        ?: "Add a phone number to your profile to get SMS alerts",
+                ) {
+                    Switch(
+                        checked = state.alerts.smsEnabled == true,
+                        onCheckedChange = viewModel::setSmsAlerts,
+                        enabled = state.alerts.smsEnabled != null,
+                    )
+                }
+                state.alerts.error?.let { error ->
+                    Row(
+                        Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = viewModel::loadAlerts) { Text("Retry") }
+                    }
                 }
             }
 

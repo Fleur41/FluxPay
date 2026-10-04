@@ -9,10 +9,14 @@ from banking.models import Account
 
 
 class Rail(models.TextChoices):
-    MPESA = "MPESA", "M-Pesa"
     PAYPAL = "PAYPAL", "PayPal"
     BANK = "BANK", "Bank transfer"
-    FAKE = "FAKE", "Fake (tests and local dev)"
+    FAKE = "FAKE", "Fake (tests only)"
+
+
+def rail_label(code: str) -> str:
+    """Display name for a rail, including rails since removed that old payments still reference."""
+    return Rail(code).label if code in Rail.values else code.title()
 
 
 class ExternalPayment(models.Model):
@@ -32,9 +36,6 @@ class ExternalPayment(models.Model):
         OUT = "OUT", "Withdrawal"
 
     class Method(models.TextChoices):
-        STK = "STK", "M-Pesa STK Push"
-        C2B = "C2B", "M-Pesa Paybill"
-        B2C = "B2C", "M-Pesa B2C"
         PAYPAL_ORDER = "PAYPAL_ORDER", "PayPal Checkout"
         PAYPAL_PAYOUT = "PAYPAL_PAYOUT", "PayPal Payout"
         BANK_OUT = "BANK_OUT", "Bank payout"
@@ -62,7 +63,7 @@ class ExternalPayment(models.Model):
     method = models.CharField(max_length=20, choices=Method.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.CREATED, db_index=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
-    currency = models.CharField(max_length=3, choices=Account.Currency.choices)
+    currency = models.CharField(max_length=3)
     fee = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     reference = models.CharField(max_length=24, unique=True)
     provider_ref = models.CharField(max_length=64, blank=True)

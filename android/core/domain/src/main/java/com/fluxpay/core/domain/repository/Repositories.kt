@@ -2,7 +2,13 @@ package com.fluxpay.core.domain.repository
 
 import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.domain.model.Account
+import com.fluxpay.core.domain.model.BudgetLine
+import com.fluxpay.core.domain.model.DownloadedStatement
+import com.fluxpay.core.domain.model.NotificationSettings
+import com.fluxpay.core.domain.model.PlatformConfig
 import com.fluxpay.core.domain.model.Recipient
+import com.fluxpay.core.domain.model.StatementFormat
+import com.fluxpay.core.domain.model.StatementPeriod
 import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.domain.model.Transaction
 import com.fluxpay.core.domain.model.TransactionFilter
@@ -10,6 +16,8 @@ import com.fluxpay.core.domain.model.TransferReceipt
 import com.fluxpay.core.domain.model.TransferRequest
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.model.UserPreferences
+import java.math.BigDecimal
+import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 
 interface AuthRepository {
@@ -73,4 +81,38 @@ interface PreferencesRepository {
     suspend fun setHideBalances(hide: Boolean)
 
     suspend fun clear()
+}
+
+interface NotificationSettingsRepository {
+    suspend fun get(): NetworkResult<NotificationSettings>
+
+    /** Only the non-null fields change. */
+    suspend fun update(emailEnabled: Boolean? = null, smsEnabled: Boolean? = null): NetworkResult<NotificationSettings>
+}
+
+interface StatementRepository {
+    /** Downloads a statement of the user's main wallet into the app's private cache. */
+    suspend fun download(period: StatementPeriod, format: StatementFormat): NetworkResult<DownloadedStatement>
+
+    /** Deletes every downloaded statement (called on sign-out). */
+    suspend fun clearDownloads()
+}
+
+/** The budget planner's data. Local only: it never leaves the phone and is wiped on sign-out. */
+interface BudgetRepository {
+    fun observeLines(): Flow<List<BudgetLine>>
+
+    suspend fun save(line: BudgetLine)
+
+    suspend fun delete(id: Long)
+
+    /** Money that left the user's wallets between the two instants (completed debits only). */
+    fun observeSpending(from: Instant, to: Instant): Flow<BigDecimal>
+}
+
+/** Business rules from the server. `config` replays the cached copy at once, then any refresh. */
+interface ConfigRepository {
+    val config: Flow<PlatformConfig?>
+
+    suspend fun refresh(): NetworkResult<PlatformConfig>
 }

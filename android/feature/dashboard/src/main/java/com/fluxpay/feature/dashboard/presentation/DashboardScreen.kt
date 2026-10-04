@@ -30,6 +30,7 @@ import com.fluxpay.core.ui.components.ErrorBanner
 import com.fluxpay.core.ui.components.FullScreenLoading
 import com.fluxpay.core.ui.components.SectionTitle
 import com.fluxpay.feature.dashboard.presentation.components.AccountsRow
+import com.fluxpay.feature.dashboard.presentation.components.BudgetPlannerCard
 import com.fluxpay.feature.dashboard.presentation.components.QuickAction
 import com.fluxpay.feature.dashboard.presentation.components.QuickActionsRow
 import com.fluxpay.feature.dashboard.presentation.viewmodel.DashboardViewModel
@@ -41,6 +42,7 @@ fun DashboardScreen(
     onSendMoney: () -> Unit,
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
+    onOpenBudget: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -83,28 +85,33 @@ fun DashboardScreen(
                     )
                 }
             }
-            item(key = "balance") {
-                BalanceCard(
-                    title = "Total balance",
-                    amount = summary.totalBalance,
-                    currency = summary.totalCurrency,
-                    hidden = summary.hideBalances,
-                    onToggleHidden = viewModel::toggleHideBalances,
-                    footer = when {
-                        summary.accounts.isEmpty() -> "No wallets yet"
-                        summary.otherCurrencyAccounts > 0 ->
-                            "+ ${summary.otherCurrencyAccounts} wallet(s) in other currencies"
-                        summary.accounts.size == 1 -> summary.accounts.first().name
-                        else -> "Across ${summary.accounts.size} wallets"
-                    },
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
+            // No balance card until a wallet has synced: there is no currency to total in yet.
+            summary.totalCurrency?.let { totalCurrency ->
+                item(key = "balance") {
+                    BalanceCard(
+                        title = "Total balance",
+                        amount = summary.totalBalance,
+                        currency = totalCurrency,
+                        hidden = summary.hideBalances,
+                        onToggleHidden = viewModel::toggleHideBalances,
+                        footer = when {
+                            summary.otherCurrencyAccounts > 0 ->
+                                "+ ${summary.otherCurrencyAccounts} wallet(s) in other currencies"
+                            summary.accounts.size == 1 -> summary.accounts.first().name
+                            else -> "Across ${summary.accounts.size} wallets"
+                        },
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                }
             }
             item(key = "actions") {
                 QuickActionsRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { weight ->
                     QuickAction(Icons.AutoMirrored.Outlined.Send, "Send", onSendMoney, weight)
                     QuickAction(Icons.Outlined.History, "History", onSeeAllTransactions, weight)
                 }
+            }
+            item(key = "budget") {
+                BudgetPlannerCard(onClick = onOpenBudget, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             }
             if (summary.accounts.size > 1) {
                 item(key = "accounts") {

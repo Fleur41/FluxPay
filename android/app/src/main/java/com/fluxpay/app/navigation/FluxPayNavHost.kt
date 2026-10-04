@@ -7,6 +7,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.navigation
 import com.fluxpay.feature.auth.navigation.AuthRoutes
 import com.fluxpay.feature.auth.navigation.authGraph
+import com.fluxpay.feature.budget.navigation.budgetScreen
+import com.fluxpay.feature.budget.navigation.navigateToBudget
 import com.fluxpay.feature.dashboard.navigation.DashboardRoutes
 import com.fluxpay.feature.dashboard.navigation.dashboardScreen
 import com.fluxpay.feature.settings.navigation.settingsScreen
@@ -19,7 +21,7 @@ const val MAIN_GRAPH = "main_graph"
 /**
  * Root graph = two nested graphs:
  *   auth_graph  → login, register, forgot/reset password
- *   main_graph  → dashboard, transfer, transactions (+ detail), settings
+ *   main_graph  → dashboard, transfer, transactions (+ detail), settings, budget planner
  * Each feature module contributes its own destinations through a NavGraphBuilder extension.
  */
 @Composable
@@ -36,6 +38,7 @@ fun FluxPayNavHost(
                 onSendMoney = { navController.navigateToTopLevel(TopLevelDestination.SEND) },
                 onSeeAllTransactions = { navController.navigateToTopLevel(TopLevelDestination.ACTIVITY) },
                 onTransactionClick = { navController.navigateToTransaction(it.id) },
+                onOpenBudget = { navController.navigateToBudget() },
             )
             transferScreen(
                 onDone = { navController.navigateToTopLevel(TopLevelDestination.HOME) },
@@ -43,6 +46,7 @@ fun FluxPayNavHost(
             )
             transactionsScreens(navController)
             settingsScreen()
+            budgetScreen(onBack = navController::popBackStack)
         }
     }
 }

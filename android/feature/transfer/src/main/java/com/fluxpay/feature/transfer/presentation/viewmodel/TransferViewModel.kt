@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.domain.model.TransferRequest
 import com.fluxpay.core.domain.usecase.ObserveAccountsUseCase
+import com.fluxpay.core.domain.model.PlatformConfig
+import com.fluxpay.core.domain.usecase.ObservePlatformConfigUseCase
 import com.fluxpay.core.domain.usecase.ObservePreferencesUseCase
 import com.fluxpay.feature.transfer.domain.usecase.LookupRecipientUseCase
 import com.fluxpay.feature.transfer.domain.usecase.SendMoneyUseCase
@@ -28,6 +30,7 @@ import kotlinx.coroutines.launch
 class TransferViewModel @Inject constructor(
     observeAccounts: ObserveAccountsUseCase,
     observePreferences: ObservePreferencesUseCase,
+    observeConfig: ObservePlatformConfigUseCase,
     private val validate: ValidateTransferUseCase,
     private val lookupRecipient: LookupRecipientUseCase,
     private val sendMoney: SendMoneyUseCase,
@@ -38,6 +41,9 @@ class TransferViewModel @Inject constructor(
 
     /** Held so it can be cancelled explicitly if the user backs out mid-request. */
     private var workJob: Job? = null
+
+    /** Business rules from the server (per-currency limits); null until loaded. */
+    @Volatile private var config: PlatformConfig? = null
 
     init {
         combine(observeAccounts(), observePreferences()) { accounts, prefs -> accounts to prefs }
@@ -52,6 +58,7 @@ class TransferViewModel @Inject constructor(
                 }
             }
             .launchIn(viewModelScope)
+        observeConfig().onEach { config = it }.launchIn(viewModelScope)
     }
 
     fun onAccountSelected(id: String) = _state.update { it.copy(selectedAccountId = id, errors = it.errors.copy(source = null)) }
@@ -71,7 +78,8 @@ class TransferViewModel @Inject constructor(
         val s = _state.value
         if (s.isWorking) return
         val source = s.selectedAccount
-        val validation = validate(source, s.recipientNumber, s.amountText, s.note)
+        val rule = source?.let { config?.currency(it.currency) }
+        val validation = validate(source, rule, s.recipientNumber, s.amountText, s.note)
         val amount = validation.amount
         if (source == null || amount == null) {
             _state.update { it.copy(errors = validation.errors) }

@@ -12,23 +12,22 @@ Lock order is always: payment row, then account rows by primary key. Keep it tha
 import logging
 from decimal import Decimal
 
-from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 from rest_framework import status
 
+from audit.services import record
 from banking.models import Account, Transaction
-from banking.services import new_reference
+from banking.services import new_reference, system_account
 from fluxpay.exceptions import BusinessError
+from platform_settings import services as rules
 
-from .models import ExternalPayment, Rail, WebhookEvent
+from .models import ExternalPayment, WebhookEvent, rail_label
 from .providers import get_provider
 from .providers.base import ProviderError, ProviderState, StatusResult
+from .signals import payment_settled
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_USER_EMAIL = "system@fluxpay.internal"
 
 Status = ExternalPayment.Status
 Direction = ExternalPayment.Direction
@@ -43,8 +42,6 @@ FAILABLE = {
     Direction.OUT: {Status.HELD, Status.SUBMITTED},
 }
 SUBMITTABLE = {Direction.IN: Status.CREATED, Direction.OUT: Status.HELD}
-# Currencies each rail settles in. A rail missing here (the fake one) accepts any wallet.
-RAIL_CURRENCIES = {Rail.MPESA: {"KES"}, Rail.PAYPAL: {"USD"}, Rail.BANK: {"KES"}}
 AFTER_SUBMIT = {Direction.IN: Status.PENDING, Direction.OUT: Status.SUBMITTED}
 
 
@@ -57,31 +54,7 @@ class PaymentNotFound(Exception):
 
 def clearing_account(rail: str, currency: str) -> Account:
     """FluxPay's account mirroring the money held at one provider in one currency. Created on first use."""
-    key = f"clearing:{rail}:{currency}"
-    account = Account.objects.filter(system_key=key).first()
-    if account is not None:
-        return account
-    owner = _system_user()
-    try:
-        with db_transaction.atomic():
-            return Account.objects.create(
-                owner=owner, system_key=key, currency=currency, name=f"{Rail(rail).label} clearing {currency}"
-            )
-    except IntegrityError:
-        return Account.objects.get(system_key=key)
-
-
-def _system_user():
-    User = get_user_model()
-    user = User.objects.filter(email=SYSTEM_USER_EMAIL).first()
-    if user is not None:
-        return user
-    try:
-        with db_transaction.atomic():
-            # No usable password and inactive: this user can never log in.
-            return User.objects.create_user(SYSTEM_USER_EMAIL, None, full_name="FluxPay", is_active=False)
-    except IntegrityError:
-        return User.objects.get(email=SYSTEM_USER_EMAIL)
+    return system_account(f"clearing:{rail}:{currency}", f"{rail_label(rail)} clearing {currency}", currency)
 
 
 # --- Starting payments -------------------------------------------------------------------------
@@ -93,10 +66,11 @@ def start_deposit(*, user, account_id, rail: str, method: str, amount: Decimal, 
     if existing:
         return existing, False
     _require_provider(rail)
-    account = Account.objects.filter(id=account_id, owner=user, is_active=True, system_key__isnull=True).first()
+    account = _personal_wallet(user, account_id)
     if account is None:
         raise BusinessError("Account not found.", "account_not_found", status.HTTP_404_NOT_FOUND)
     _require_currency(rail, account.currency)
+    rules.check_amount(amount, account.currency)
 
     try:
         with db_transaction.atomic():
@@ -113,6 +87,7 @@ def start_deposit(*, user, account_id, rail: str, method: str, amount: Decimal, 
                 idempotency_key=idempotency_key,
                 metadata=metadata or {},
             )
+            _audit("payment.deposit_started", payment, actor=user)
             _queue_submit(payment)
     except IntegrityError:
         return ExternalPayment.objects.get(initiated_by=user, idempotency_key=idempotency_key), False
@@ -125,14 +100,11 @@ def start_payout(*, user, account_id, rail: str, method: str, amount: Decimal, i
     if existing:
         return existing, False
     _require_provider(rail)
-    if amount > settings.FLUXPAY_MAX_TRANSFER:
-        raise BusinessError(
-            f"Withdrawals are limited to {settings.FLUXPAY_MAX_TRANSFER:,.2f} per transaction.", "limit_exceeded"
-        )
-    wallet = Account.objects.filter(id=account_id, owner=user, is_active=True, system_key__isnull=True).first()
+    wallet = _personal_wallet(user, account_id)
     if wallet is None:
         raise BusinessError("Account not found.", "account_not_found", status.HTTP_404_NOT_FOUND)
     _require_currency(rail, wallet.currency)
+    rules.check_amount(amount, wallet.currency)
     clearing = clearing_account(rail, wallet.currency)
 
     try:
@@ -162,6 +134,7 @@ def start_payout(*, user, account_id, rail: str, method: str, amount: Decimal, i
                 credit_category=Transaction.Category.WITHDRAWAL,
                 line_status=Transaction.Status.PENDING,
             )
+            _audit("payment.payout_started", payment, actor=user)
             _queue_submit(payment)
     except IntegrityError:
         return ExternalPayment.objects.get(initiated_by=user, idempotency_key=idempotency_key), False
@@ -244,6 +217,8 @@ def complete_payment(payment_id, result: StatusResult) -> ExternalPayment:
         if result.provider_ref and not payment.provider_ref:
             payment.provider_ref = result.provider_ref
         payment.save(update_fields=["status", "completed_at", "provider_ref", "updated_at"])
+        _audit("payment.completed", payment)
+        payment_settled.send(sender=ExternalPayment, payment=payment)
     return payment
 
 
@@ -276,6 +251,8 @@ def fail_payment(payment_id, reason: str) -> ExternalPayment:
             payment.status = Status.REVERSED
         payment.failure_reason = reason[:255]
         payment.save(update_fields=["status", "failure_reason", "updated_at"])
+        _audit("payment.reversed" if payment.status == Status.REVERSED else "payment.failed", payment)
+        payment_settled.send(sender=ExternalPayment, payment=payment)
     return payment
 
 
@@ -326,7 +303,7 @@ def record_webhook(rail: str, headers: dict, payload: dict) -> WebhookEvent | No
             event = WebhookEvent.objects.create(rail=rail, event_id=callback.event_id, headers=headers, payload=payload)
             from .tasks import process_webhook_event
 
-            db_transaction.on_commit(lambda: process_webhook_event.delay(str(event.id)))
+            db_transaction.on_commit(lambda: process_webhook_event.delay(str(event.id)), robust=True)
     except IntegrityError:
         return None
     return event
@@ -368,6 +345,13 @@ def give_up_on_webhook(event_id, error: str) -> None:
 # --- Helpers -----------------------------------------------------------------------------------
 
 
+def _personal_wallet(user, account_id):
+    """The user's own active wallet. Business wallets are excluded: they move money through organizations."""
+    return Account.objects.filter(
+        id=account_id, owner=user, organization__isnull=True, is_active=True, system_key__isnull=True
+    ).first()
+
+
 def _existing(user, idempotency_key: str):
     return ExternalPayment.objects.filter(initiated_by=user, idempotency_key=idempotency_key).first()
 
@@ -380,10 +364,11 @@ def _require_provider(rail: str) -> None:
 
 
 def _require_currency(rail: str, currency: str) -> None:
-    allowed = RAIL_CURRENCIES.get(rail)
+    """The provider adapter declares which currencies it settles in (None: any)."""
+    allowed = get_provider(rail).currencies
     if allowed is not None and currency not in allowed:
         raise BusinessError(
-            f"{Rail(rail).label} works with {', '.join(sorted(allowed))} wallets, not {currency}.",
+            f"{rail_label(rail)} works with {', '.join(sorted(allowed))} wallets, not {currency}.",
             "currency_not_supported",
         )
 
@@ -392,7 +377,7 @@ def _queue_submit(payment: ExternalPayment) -> None:
     from .tasks import submit_payment_task
 
     payment_id = str(payment.id)
-    db_transaction.on_commit(lambda: submit_payment_task.delay(payment_id))
+    db_transaction.on_commit(lambda: submit_payment_task.delay(payment_id), robust=True)
 
 
 def _lock_payment(payment_id) -> ExternalPayment:
@@ -403,6 +388,22 @@ def _lock_accounts(*ids) -> dict:
     # Fixed order (by primary key), the same order banking.services.transfer_funds uses.
     accounts = Account.objects.select_for_update().filter(id__in=ids).order_by("id")
     return {a.id: a for a in accounts}
+
+
+def _audit(action: str, payment: ExternalPayment, *, actor=None) -> None:
+    """Records a payment event. Call after the payment's row and account locks are taken."""
+    record(
+        action,
+        actor=actor,
+        target=payment,
+        metadata={
+            "amount": str(payment.amount),
+            "currency": payment.currency,
+            "rail": payment.rail,
+            "reference": payment.reference,
+            **({"reason": payment.failure_reason} if payment.failure_reason else {}),
+        },
+    )
 
 
 def _flag(payment: ExternalPayment, note: str) -> None:
@@ -420,7 +421,7 @@ def _post(payment, *, debit: Account, credit: Account, debit_category, credit_ca
     debit.save(update_fields=["balance", "updated_at"])
     credit.save(update_fields=["balance", "updated_at"])
 
-    provider_name = Rail(payment.rail).label
+    provider_name = rail_label(payment.rail)
     customer = payment.account.owner.full_name
     descriptions = {
         Transaction.Category.DEPOSIT: f"Deposit from {provider_name}",

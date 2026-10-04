@@ -1,6 +1,8 @@
 package com.fluxpay.feature.auth.presentation
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
@@ -22,7 +24,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fluxpay.core.common.util.Constants
 import com.fluxpay.core.ui.components.EmptyState
 import com.fluxpay.core.ui.components.ErrorBanner
 import com.fluxpay.core.ui.components.FluxPasswordField
@@ -73,7 +74,7 @@ fun LoginScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun RegisterScreen(
     onBack: () -> Unit,
@@ -120,12 +121,19 @@ fun RegisterScreen(
             onImeAction = viewModel::submit,
         )
         Text("Wallet currency", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Constants.SUPPORTED_CURRENCIES.forEach { code ->
+        if (state.currenciesUnavailable) {
+            ErrorBanner(
+                message = "Couldn't load the available currencies.",
+                offline = true,
+                onRetry = viewModel::loadCurrencies,
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            state.currencies.forEach { currency ->
                 FilterChip(
-                    selected = state.currency == code,
-                    onClick = { viewModel.onCurrencyChange(code) },
-                    label = { Text(code) },
+                    selected = state.currency == currency.code,
+                    onClick = { viewModel.onCurrencyChange(currency.code) },
+                    label = { Text(currency.code) },
                 )
             }
         }

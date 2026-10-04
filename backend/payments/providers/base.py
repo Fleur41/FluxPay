@@ -31,7 +31,7 @@ class StatusResult:
 class Callback:
     event_id: str  # the provider's id for this notification; used to drop replays
     provider_ref: str  # finds the payment the notification is about
-    details: dict = field(default_factory=dict)  # safe extras kept on the payment, e.g. a receipt number
+    details: dict = field(default_factory=dict)  # safe extras kept on the payment, e.g. "provider_receipt"
 
 
 class ProviderError(Exception):
@@ -47,9 +47,12 @@ class InvalidCallback(Exception):
 
 
 class PaymentProvider(ABC):
+    #: Currencies this provider settles in; None means any wallet currency.
+    currencies: frozenset[str] | None = None
+
     @abstractmethod
     def start_deposit(self, payment) -> SubmitResult:
-        """Ask the provider to collect `payment.amount` into FluxPay (e.g. send an STK Push prompt)."""
+        """Ask the provider to collect `payment.amount` into FluxPay (e.g. send the customer a payment prompt)."""
 
     @abstractmethod
     def start_payout(self, payment) -> SubmitResult:

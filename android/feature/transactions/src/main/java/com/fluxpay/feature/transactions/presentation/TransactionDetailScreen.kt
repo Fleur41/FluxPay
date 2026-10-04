@@ -139,6 +139,8 @@ private fun TransactionCategory.label() = when (this) {
     TransactionCategory.TRANSFER_OUT -> "Money sent"
     TransactionCategory.BONUS -> "Bonus"
     TransactionCategory.DEPOSIT -> "Deposit"
+    TransactionCategory.WITHDRAWAL -> "Withdrawal"
+    TransactionCategory.WITHDRAWAL_REVERSAL -> "Money returned"
     TransactionCategory.UNKNOWN -> "Other"
 }
 

@@ -5,7 +5,6 @@ All environment-specific values are read from environment variables so the
 same code runs locally (dev), on staging and in production.
 """
 from datetime import timedelta
-from decimal import Decimal
 from pathlib import Path
 import os
 
@@ -47,6 +46,10 @@ INSTALLED_APPS = [
     "users",
     "banking",
     "payments",
+    "organizations",
+    "audit",
+    "notifications",
+    "platform_settings",
 ]
 
 MIDDLEWARE = [
@@ -56,6 +59,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "audit.middleware.AuditContextMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -124,7 +128,13 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {"anon": "30/min", "user": "300/min", "transfers": "20/min", "deposits": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "30/min",
+        "user": "300/min",
+        "transfers": "20/min",
+        "deposits": "10/min",
+        "statements": "10/min",
+    },
     "EXCEPTION_HANDLER": "fluxpay.exceptions.api_exception_handler",
 }
 
@@ -144,36 +154,27 @@ EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.conso
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "FluxPay <no-reply@fluxpay.app>")
 # Deep link the Android app opens (handled by MainActivity).
 PASSWORD_RESET_LINK = os.environ.get("PASSWORD_RESET_LINK", "fluxpay://reset-password?uid={uid}&token={token}")
-
-# FluxPay business settings
-FLUXPAY_DEFAULT_CURRENCY = os.environ.get("FLUXPAY_DEFAULT_CURRENCY", "KES")
-# Demo money credited to every new wallet so transfers can be tried out. Keep 0 in production.
-FLUXPAY_SIGNUP_BONUS = Decimal(os.environ.get("FLUXPAY_SIGNUP_BONUS", "10000.00" if DEBUG else "0"))
-FLUXPAY_MAX_TRANSFER = Decimal(os.environ.get("FLUXPAY_MAX_TRANSFER", "500000.00"))
+# Deep link in business invitation emails.
+ORG_INVITE_LINK = os.environ.get("ORG_INVITE_LINK", "fluxpay://join-business?token={token}")
 
 # External payments (payments app)
-# Rail -> provider adapter. The fake provider settles without real money, so it only exists in DEBUG.
+# Rail -> provider adapter class. No rail is enabled yet; the fake provider exists only in tests.
 FLUXPAY_PAYMENT_PROVIDERS = {}
-if DEBUG:
-    FLUXPAY_PAYMENT_PROVIDERS["FAKE"] = "payments.providers.fake.FakeProvider"
 # Secret path segment in every callback URL (/hooks/<rail>/<token>/). Empty disables all callbacks.
 FLUXPAY_WEBHOOK_TOKEN = os.environ.get("FLUXPAY_WEBHOOK_TOKEN", "dev-webhook-token" if DEBUG else "")
 FLUXPAY_STATUS_CHECK_AFTER_SECONDS = int(os.environ.get("FLUXPAY_STATUS_CHECK_AFTER_SECONDS", "120"))
 FLUXPAY_DEPOSIT_EXPIRY_MINUTES = int(os.environ.get("FLUXPAY_DEPOSIT_EXPIRY_MINUTES", "30"))
 FLUXPAY_WEBHOOK_MATCH_RETRIES = 5
-# Public HTTPS address providers call back to (in dev, the tunnel URL), e.g. https://abc.trycloudflare.com
-FLUXPAY_PUBLIC_URL = os.environ.get("FLUXPAY_PUBLIC_URL", "")
-
-# M-Pesa (Safaricom Daraja). Enabled once consumer key, secret, passkey and the public URL are set.
-MPESA_ENV = os.environ.get("MPESA_ENV", "sandbox")
-if MPESA_ENV not in {"sandbox", "production"}:
-    raise RuntimeError("MPESA_ENV must be 'sandbox' or 'production'")
-MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
-MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
-MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")  # Daraja's sandbox test Paybill
-MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
-if all((MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_PASSKEY, FLUXPAY_PUBLIC_URL)):
-    FLUXPAY_PAYMENT_PROVIDERS["MPESA"] = "payments.providers.mpesa.MpesaProvider"
+# Transaction alerts (notifications app). Times in alerts and statements are shown in this zone.
+FLUXPAY_DISPLAY_TIMEZONE = os.environ.get("FLUXPAY_DISPLAY_TIMEZONE", "Africa/Nairobi")
+# SMS: Africa's Talking once an API key is set, otherwise printed to the log.
+AFRICASTALKING_USERNAME = os.environ.get("AFRICASTALKING_USERNAME", "sandbox")
+AFRICASTALKING_API_KEY = os.environ.get("AFRICASTALKING_API_KEY", "")
+AFRICASTALKING_SENDER_ID = os.environ.get("AFRICASTALKING_SENDER_ID", "")
+FLUXPAY_SMS_BACKEND = os.environ.get(
+    "FLUXPAY_SMS_BACKEND",
+    "notifications.sms.AfricasTalkingSmsBackend" if AFRICASTALKING_API_KEY else "notifications.sms.ConsoleSmsBackend",
+)
 
 # Celery (background payment work). Without a broker, tasks run inline in the web process,
 # which keeps `manage.py runserver` working with no Redis; scheduled jobs then don't run.
