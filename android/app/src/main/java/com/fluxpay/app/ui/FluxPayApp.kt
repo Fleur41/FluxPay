@@ -38,7 +38,7 @@ fun FluxPayApp(
     onDeepLinkConsumed: () -> Unit,
     sessionWarningSeconds: Long?,
     onStaySignedIn: () -> Unit,
-    timedOut: Boolean,
+    timedOutAfterMinutes: Int?,
     onTimedOutShown: () -> Unit,
 ) {
     val navController = rememberNavController()
@@ -68,9 +68,10 @@ fun FluxPayApp(
         }
     }
 
-    LaunchedEffect(timedOut) {
-        if (timedOut) {
-            snackbarHostState.showSnackbar("For your security, you were signed out after 5 minutes of inactivity.")
+    LaunchedEffect(timedOutAfterMinutes) {
+        timedOutAfterMinutes?.let { minutes ->
+            val unit = if (minutes == 1) "minute" else "minutes"
+            snackbarHostState.showSnackbar("For your security, you were signed out after $minutes $unit of inactivity.")
             onTimedOutShown()
         }
     }

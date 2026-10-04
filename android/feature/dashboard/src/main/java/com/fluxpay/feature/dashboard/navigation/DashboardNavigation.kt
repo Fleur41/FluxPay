@@ -13,12 +13,14 @@ fun NavGraphBuilder.dashboardScreen(
     onSendMoney: () -> Unit,
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
+    onOpenBudget: () -> Unit,
 ) {
     composable(DashboardRoutes.DASHBOARD) {
         DashboardScreen(
             onSendMoney = onSendMoney,
             onSeeAllTransactions = onSeeAllTransactions,
             onTransactionClick = onTransactionClick,
+            onOpenBudget = onOpenBudget,
         )
     }
 }

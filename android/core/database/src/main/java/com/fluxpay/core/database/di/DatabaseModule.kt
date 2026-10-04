@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.fluxpay.core.database.FluxPayDatabase
 import com.fluxpay.core.database.dao.AccountDao
+import com.fluxpay.core.database.dao.BudgetDao
 import com.fluxpay.core.database.dao.TransactionDao
 import com.fluxpay.core.database.dao.UserDao
 import dagger.Module
@@ -21,7 +22,8 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): FluxPayDatabase =
         Room.databaseBuilder(context, FluxPayDatabase::class.java, FluxPayDatabase.NAME)
-            // The DB is only a cache of server data, so wiping it on schema change is safe.
+            // Only reached when a migration is missing. The server caches would refetch, but budget lines
+            // would be lost, so new schema versions must ship a migration (see FluxPayDatabase).
             .fallbackToDestructiveMigration()
             .build()
 
@@ -33,4 +35,7 @@ object DatabaseModule {
 
     @Provides
     fun provideTransactionDao(db: FluxPayDatabase): TransactionDao = db.transactionDao()
+
+    @Provides
+    fun provideBudgetDao(db: FluxPayDatabase): BudgetDao = db.budgetDao()
 }

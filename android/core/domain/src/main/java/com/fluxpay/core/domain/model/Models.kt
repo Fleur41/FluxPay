@@ -21,7 +21,7 @@ data class Account(
 
 enum class TransactionType { CREDIT, DEBIT }
 
-enum class TransactionCategory { TRANSFER_IN, TRANSFER_OUT, BONUS, DEPOSIT, UNKNOWN }
+enum class TransactionCategory { TRANSFER_IN, TRANSFER_OUT, BONUS, DEPOSIT, WITHDRAWAL, WITHDRAWAL_REVERSAL, UNKNOWN }
 
 enum class TransactionStatus { PENDING, COMPLETED, FAILED, UNKNOWN }
 
@@ -76,7 +76,8 @@ data class TransferReceipt(
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 data class UserPreferences(
-    val currency: String = "KES",
+    /** The currency the dashboard totals in; null until the user picks one (the first wallet's is used). */
+    val currency: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val hideBalances: Boolean = false,
 )

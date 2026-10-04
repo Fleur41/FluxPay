@@ -10,11 +10,19 @@ import com.fluxpay.core.data.datastore.PreferencesRepositoryImpl
 import com.fluxpay.core.data.datastore.SecureTokenStore
 import com.fluxpay.core.data.repository.AccountRepositoryImpl
 import com.fluxpay.core.data.repository.AuthRepositoryImpl
+import com.fluxpay.core.data.repository.BudgetRepositoryImpl
+import com.fluxpay.core.data.repository.ConfigRepositoryImpl
+import com.fluxpay.core.data.repository.NotificationSettingsRepositoryImpl
+import com.fluxpay.core.data.repository.StatementRepositoryImpl
 import com.fluxpay.core.data.repository.TransactionRepositoryImpl
 import com.fluxpay.core.data.repository.TransferRepositoryImpl
 import com.fluxpay.core.domain.repository.AccountRepository
 import com.fluxpay.core.domain.repository.AuthRepository
+import com.fluxpay.core.domain.repository.BudgetRepository
+import com.fluxpay.core.domain.repository.ConfigRepository
+import com.fluxpay.core.domain.repository.NotificationSettingsRepository
 import com.fluxpay.core.domain.repository.PreferencesRepository
+import com.fluxpay.core.domain.repository.StatementRepository
 import com.fluxpay.core.domain.repository.TransactionRepository
 import com.fluxpay.core.domain.repository.TransferRepository
 import dagger.Binds
@@ -34,6 +42,10 @@ annotation class SessionDataStore
 @Retention(AnnotationRetention.BINARY)
 annotation class SettingsDataStore
 
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ConfigDataStore
+
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DataModule {
@@ -43,6 +55,12 @@ abstract class DataModule {
     @Binds abstract fun bindTransactionRepository(impl: TransactionRepositoryImpl): TransactionRepository
     @Binds abstract fun bindTransferRepository(impl: TransferRepositoryImpl): TransferRepository
     @Binds abstract fun bindPreferencesRepository(impl: PreferencesRepositoryImpl): PreferencesRepository
+    @Binds abstract fun bindNotificationSettingsRepository(
+        impl: NotificationSettingsRepositoryImpl,
+    ): NotificationSettingsRepository
+    @Binds abstract fun bindStatementRepository(impl: StatementRepositoryImpl): StatementRepository
+    @Binds abstract fun bindBudgetRepository(impl: BudgetRepositoryImpl): BudgetRepository
+    @Binds abstract fun bindConfigRepository(impl: ConfigRepositoryImpl): ConfigRepository
 }
 
 @Module
@@ -61,4 +79,10 @@ object DataStoreModule {
     @SettingsDataStore
     fun provideSettingsDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
         PreferenceDataStoreFactory.create(produceFile = { context.preferencesDataStoreFile("fluxpay_settings") })
+
+    @Provides
+    @Singleton
+    @ConfigDataStore
+    fun provideConfigDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(produceFile = { context.preferencesDataStoreFile("fluxpay_config") })
 }

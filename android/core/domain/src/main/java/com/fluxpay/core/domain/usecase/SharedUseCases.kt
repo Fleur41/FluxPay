@@ -1,10 +1,13 @@
 package com.fluxpay.core.domain.usecase
 
+import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.domain.model.Account
+import com.fluxpay.core.domain.model.PlatformConfig
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.model.UserPreferences
 import com.fluxpay.core.domain.repository.AccountRepository
 import com.fluxpay.core.domain.repository.AuthRepository
+import com.fluxpay.core.domain.repository.ConfigRepository
 import com.fluxpay.core.domain.repository.PreferencesRepository
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
@@ -30,4 +33,13 @@ class ObserveAccountsUseCase @Inject constructor(private val accountRepository: 
 
 class ObserveProfileUseCase @Inject constructor(private val authRepository: AuthRepository) {
     operator fun invoke(): Flow<User?> = authRepository.observeProfile()
+}
+
+/** Business rules (currencies, limits, timeouts) from the server; null until first loaded. */
+class ObservePlatformConfigUseCase @Inject constructor(private val configRepository: ConfigRepository) {
+    operator fun invoke(): Flow<PlatformConfig?> = configRepository.config
+}
+
+class RefreshPlatformConfigUseCase @Inject constructor(private val configRepository: ConfigRepository) {
+    suspend operator fun invoke(): NetworkResult<PlatformConfig> = configRepository.refresh()
 }

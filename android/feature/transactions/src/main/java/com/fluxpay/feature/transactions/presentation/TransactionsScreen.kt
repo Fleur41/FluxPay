@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,6 +26,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -34,6 +38,7 @@ import com.fluxpay.core.ui.adapter.transactionItems
 import com.fluxpay.core.ui.components.EmptyState
 import com.fluxpay.core.ui.components.ErrorBanner
 import com.fluxpay.feature.transactions.domain.model.TypeFilter
+import com.fluxpay.feature.transactions.presentation.components.StatementSheet
 import com.fluxpay.feature.transactions.presentation.viewmodel.TransactionsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,8 +48,20 @@ fun TransactionsScreen(
     viewModel: TransactionsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var showStatementSheet by rememberSaveable { mutableStateOf(false) }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Transactions") }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Transactions") },
+                actions = {
+                    IconButton(onClick = { showStatementSheet = true }) {
+                        Icon(Icons.Outlined.FileDownload, contentDescription = "Download statement")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(
                 value = state.query,
@@ -109,5 +126,9 @@ fun TransactionsScreen(
                 }
             }
         }
+    }
+
+    if (showStatementSheet) {
+        StatementSheet(onDismiss = { showStatementSheet = false })
     }
 }

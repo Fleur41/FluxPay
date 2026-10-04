@@ -14,6 +14,7 @@ from rest_framework.test import APITestCase
 from banking.models import Account, Transaction
 from banking.services import open_wallet
 from fluxpay.celery import app as celery_app
+from fluxpay.testing import funded
 from fluxpay.exceptions import BusinessError
 
 from . import services, tasks
@@ -24,9 +25,11 @@ User = get_user_model()
 Status = ExternalPayment.Status
 FAKE = {"FAKE": "payments.providers.fake.FakeProvider"}
 TOKEN = "test-webhook-token"
-payment_settings = override_settings(
-    FLUXPAY_SIGNUP_BONUS=Decimal("1000.00"), FLUXPAY_PAYMENT_PROVIDERS=FAKE, FLUXPAY_WEBHOOK_TOKEN=TOKEN
-)
+_payment_overrides = override_settings(FLUXPAY_PAYMENT_PROVIDERS=FAKE, FLUXPAY_WEBHOOK_TOKEN=TOKEN)
+
+
+def payment_settings(cls):
+    return funded(_payment_overrides(cls))
 
 
 class PaymentTestMixin:
@@ -92,10 +95,9 @@ class PaymentTestMixin:
         return account.balance
 
     def assertLedgerBalanced(self):
-        """All money in the system is the signup bonus: every deposit and payout nets to zero."""
+        """Double entry: every shilling in a wallet came from a system account, so all balances sum to zero."""
         total = Account.objects.filter(currency="KES").aggregate(total=Sum("balance"))["total"]
-        bonuses = Transaction.objects.filter(category=Transaction.Category.BONUS).aggregate(total=Sum("amount"))
-        self.assertEqual(total, bonuses["total"])
+        self.assertEqual(total, Decimal("0.00"))
 
 
 @payment_settings
@@ -279,7 +281,7 @@ class WebhookTests(PaymentTestMixin, APITestCase):
     def test_wrong_token_or_unknown_rail_is_not_found(self):
         payment = self.deposit()
         self.assertEqual(self.callback(payment, token="wrong").status_code, 404)
-        res = self.client.post(f"/hooks/mpesa/{TOKEN}/", {"event_id": "e", "provider_ref": "x"}, format="json")
+        res = self.client.post(f"/hooks/paypal/{TOKEN}/", {"event_id": "e", "provider_ref": "x"}, format="json")
         self.assertEqual(res.status_code, 404)
         self.assertFalse(WebhookEvent.objects.exists())
 
@@ -347,6 +349,8 @@ class PaymentApiTests(PaymentTestMixin, APITestCase):
 @payment_settings
 @skipUnless(connection.vendor == "postgresql", "needs real row locks (PostgreSQL)")
 class ConcurrencyTests(PaymentTestMixin, TransactionTestCase):
+    serialized_rollback = True  # keep the platform settings rows the data migration created
+
     def test_racing_settlements_credit_once(self):
         self.user, self.wallet = self.make_user()
         payment = self.deposit("500.00")

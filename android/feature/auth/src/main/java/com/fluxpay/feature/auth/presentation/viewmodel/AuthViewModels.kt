@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.common.util.isValidEmail
+import com.fluxpay.core.domain.usecase.ObservePlatformConfigUseCase
+import com.fluxpay.core.domain.usecase.RefreshPlatformConfigUseCase
+import com.fluxpay.feature.auth.domain.model.FieldErrors
 import com.fluxpay.feature.auth.domain.usecase.ConfirmPasswordResetUseCase
 import com.fluxpay.feature.auth.domain.usecase.LoginUseCase
 import com.fluxpay.feature.auth.domain.usecase.RegisterUseCase
 import com.fluxpay.feature.auth.domain.usecase.RequestPasswordResetUseCase
 import com.fluxpay.feature.auth.domain.usecase.ValidateCredentialsUseCase
-import com.fluxpay.feature.auth.domain.model.FieldErrors
 import com.fluxpay.feature.auth.navigation.AuthRoutes
 import com.fluxpay.feature.auth.presentation.state.ForgotPasswordUiState
 import com.fluxpay.feature.auth.presentation.state.LoginUiState
@@ -21,6 +23,9 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -71,10 +76,34 @@ class LoginViewModel @Inject constructor(
 class RegisterViewModel @Inject constructor(
     private val validate: ValidateCredentialsUseCase,
     private val register: RegisterUseCase,
+    observeConfig: ObservePlatformConfigUseCase,
+    private val refreshConfig: RefreshPlatformConfigUseCase,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RegisterUiState())
     val state: StateFlow<RegisterUiState> = _state.asStateFlow()
+
+    init {
+        // Currencies come from the server; keep the user's pick if it is still offered.
+        observeConfig().filterNotNull().onEach { config ->
+            _state.update { s ->
+                val codes = config.currencies.map { it.code }
+                s.copy(
+                    currencies = config.currencies,
+                    currency = s.currency.takeIf { it in codes } ?: config.defaultCurrency,
+                    currenciesUnavailable = false,
+                )
+            }
+        }.launchIn(viewModelScope)
+        loadCurrencies()
+    }
+
+    fun loadCurrencies() {
+        viewModelScope.launch {
+            val failed = refreshConfig() is NetworkResult.Error
+            _state.update { it.copy(currenciesUnavailable = failed && it.currencies.isEmpty()) }
+        }
+    }
 
     fun onFullNameChange(v: String) = _state.update { it.copy(fullName = v, errors = it.errors.copy(fullName = null)) }
     fun onEmailChange(v: String) = _state.update { it.copy(email = v, errors = it.errors.copy(email = null)) }
@@ -87,6 +116,11 @@ class RegisterViewModel @Inject constructor(
     fun submit() {
         val s = _state.value
         if (s.isLoading) return
+        if (s.currency.isBlank()) {
+            _state.update { it.copy(errorMessage = "Couldn't load the available currencies. Check your connection and try again.") }
+            loadCurrencies()
+            return
+        }
         val errors = validate.register(s.fullName, s.email, s.phone, s.password, s.confirmPassword)
         if (!errors.isValid) {
             _state.update { it.copy(errors = errors) }

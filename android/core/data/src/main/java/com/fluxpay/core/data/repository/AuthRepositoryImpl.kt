@@ -12,6 +12,7 @@ import com.fluxpay.core.database.FluxPayDatabase
 import com.fluxpay.core.database.dao.UserDao
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.repository.AuthRepository
+import com.fluxpay.core.domain.repository.StatementRepository
 import com.fluxpay.core.network.ApiCaller
 import com.fluxpay.core.network.api.FluxPayApi
 import com.fluxpay.core.network.dto.AuthResponseDto
@@ -34,6 +35,7 @@ class AuthRepositoryImpl @Inject constructor(
     private val tokenStore: AuthTokenStore,
     private val userDao: UserDao,
     private val database: FluxPayDatabase,
+    private val statementRepository: StatementRepository,
     @Dispatcher(FluxDispatcher.IO) private val io: CoroutineDispatcher,
 ) : AuthRepository {
 
@@ -68,8 +70,10 @@ class AuthRepositoryImpl @Inject constructor(
             tokenStore.refreshToken()?.let { refresh -> apiCaller { api.logout(RefreshRequestDto(refresh)) } }
         }
         tokenStore.clear()
-        // Wipe every cached balance/transaction so the next user of this phone sees nothing.
+        // Wipe every cached balance/transaction (and the budget planner) so the next user of this phone
+        // sees nothing, plus any downloaded statements.
         database.clearAllTables()
+        statementRepository.clearDownloads()
     }
 
     override suspend fun requestPasswordReset(email: String): NetworkResult<String> = withContext(io) {

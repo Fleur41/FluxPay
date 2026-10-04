@@ -1,6 +1,6 @@
 package com.fluxpay.feature.auth.presentation.state
 
-import com.fluxpay.core.common.util.Constants
+import com.fluxpay.core.domain.model.CurrencyRule
 import com.fluxpay.feature.auth.domain.model.FieldErrors
 
 data class LoginUiState(
@@ -17,7 +17,10 @@ data class RegisterUiState(
     val phone: String = "",
     val password: String = "",
     val confirmPassword: String = "",
-    val currency: String = Constants.DEFAULT_CURRENCY,
+    /** Enabled currencies from the server's platform settings; empty until loaded. */
+    val currencies: List<CurrencyRule> = emptyList(),
+    val currency: String = "",
+    val currenciesUnavailable: Boolean = false,
     val errors: FieldErrors = FieldErrors(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,

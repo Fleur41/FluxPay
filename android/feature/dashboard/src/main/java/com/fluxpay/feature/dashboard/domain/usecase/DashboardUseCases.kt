@@ -31,7 +31,6 @@ class ObserveDashboardUseCase @Inject constructor(
         // If no wallet matches the preferred currency, fall back to the first wallet's currency.
         val currency = accounts.firstOrNull { it.currency == prefs.currency }?.currency
             ?: accounts.firstOrNull()?.currency
-            ?: prefs.currency
         val inCurrency = accounts.filter { it.currency == currency }
         DashboardSummary(
             firstName = user?.fullName?.substringBefore(' ').orEmpty(),

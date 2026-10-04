@@ -129,3 +129,33 @@ data class ErrorEnvelopeDto(val error: ErrorBodyDto)
 
 @JsonClass(generateAdapter = true)
 data class ErrorBodyDto(val code: String = "error", val message: String = "Something went wrong")
+
+@JsonClass(generateAdapter = true)
+data class NotificationSettingsDto(
+    @Json(name = "email_enabled") val emailEnabled: Boolean,
+    @Json(name = "sms_enabled") val smsEnabled: Boolean,
+)
+
+/** PATCH body: Moshi leaves out null fields, so only the changed switch is sent. */
+@JsonClass(generateAdapter = true)
+data class NotificationSettingsPatchDto(
+    @Json(name = "email_enabled") val emailEnabled: Boolean? = null,
+    @Json(name = "sms_enabled") val smsEnabled: Boolean? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class CurrencyRuleDto(
+    val code: String,
+    val name: String,
+    @Json(name = "min_transfer") val minTransfer: BigDecimal,
+    @Json(name = "max_transfer") val maxTransfer: BigDecimal,
+)
+
+@JsonClass(generateAdapter = true)
+data class PlatformConfigDto(
+    val currencies: List<CurrencyRuleDto>,
+    @Json(name = "default_currency") val defaultCurrency: String,
+    @Json(name = "statement_max_days") val statementMaxDays: Int,
+    @Json(name = "session_timeout_minutes") val sessionTimeoutMinutes: Int,
+    @Json(name = "budget_guideline") val budgetGuideline: Map<String, Int>,
+)

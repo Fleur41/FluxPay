@@ -6,6 +6,7 @@ import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.domain.usecase.LogoutUseCase
 import com.fluxpay.core.domain.usecase.ObservePreferencesUseCase
 import com.fluxpay.core.domain.usecase.ObserveSessionUseCase
+import com.fluxpay.core.domain.usecase.RefreshPlatformConfigUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,7 @@ class MainViewModel @Inject constructor(
     observeSession: ObserveSessionUseCase,
     observePreferences: ObservePreferencesUseCase,
     private val logoutUseCase: LogoutUseCase,
+    private val refreshConfig: RefreshPlatformConfigUseCase,
 ) : ViewModel() {
 
     /** The splash screen stays up until this leaves Loading. */
@@ -49,9 +51,13 @@ class MainViewModel @Inject constructor(
         observeSession()
             .onEach { loggedIn ->
                 if (wasLoggedIn && !loggedIn) viewModelScope.launch { logoutUseCase(revokeRemotely = false) }
+                // Business rules (limits, currencies, timeout) are re-read at each sign-in, so staff changes
+                // reach phones without an app update. A failure keeps the cached copy.
+                if (loggedIn && !wasLoggedIn) viewModelScope.launch { refreshConfig() }
                 wasLoggedIn = loggedIn
             }
             .launchIn(viewModelScope)
+        viewModelScope.launch { refreshConfig() } // at start-up too: the sign-up screen needs currencies
     }
 
     fun onDeepLink(link: String) {

@@ -46,7 +46,7 @@ class MainActivity : FragmentActivity() {
             val uiState by mainViewModel.uiState.collectAsStateWithLifecycle()
             val pendingDeepLink by mainViewModel.pendingDeepLink.collectAsStateWithLifecycle()
             val warningSeconds by sessionViewModel.warningSecondsLeft.collectAsStateWithLifecycle()
-            val timedOut by sessionViewModel.timedOut.collectAsStateWithLifecycle()
+            val timedOutAfterMinutes by sessionViewModel.timedOutAfterMinutes.collectAsStateWithLifecycle()
 
             val ready = uiState as? MainUiState.Ready ?: return@setContent
             FluxPayTheme(themeMode = ready.themeMode) {
@@ -56,7 +56,7 @@ class MainActivity : FragmentActivity() {
                     onDeepLinkConsumed = mainViewModel::onDeepLinkConsumed,
                     sessionWarningSeconds = warningSeconds,
                     onStaySignedIn = sessionViewModel::staySignedIn,
-                    timedOut = timedOut,
+                    timedOutAfterMinutes = timedOutAfterMinutes,
                     onTimedOutShown = sessionViewModel::onTimeoutMessageShown,
                 )
             }

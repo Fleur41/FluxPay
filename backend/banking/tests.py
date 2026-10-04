@@ -2,8 +2,9 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.test import override_settings
 from rest_framework.test import APITestCase
+
+from fluxpay.testing import funded, platform_rules
 
 from banking.models import Transaction
 from banking.services import open_wallet
@@ -12,7 +13,7 @@ User = get_user_model()
 PASSWORD = "Str0ng-Pass!42"
 
 
-@override_settings(FLUXPAY_SIGNUP_BONUS=Decimal("1000.00"))
+@funded
 class AuthFlowTests(APITestCase):
     def test_register_returns_tokens_and_opens_wallet_with_bonus(self):
         res = self.client.post(
@@ -73,7 +74,7 @@ class AuthFlowTests(APITestCase):
         self.assertEqual(len(mail.outbox), 0)
 
 
-@override_settings(FLUXPAY_SIGNUP_BONUS=Decimal("1000.00"), FLUXPAY_MAX_TRANSFER=Decimal("5000.00"))
+@platform_rules(signup_bonus="1000.00", max_transfer="5000.00")
 class TransferTests(APITestCase):
     def setUp(self):
         self.alice = User.objects.create_user("alice@example.com", PASSWORD, full_name="Alice Kamau")

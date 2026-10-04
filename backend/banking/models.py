@@ -13,22 +13,22 @@ def generate_account_number() -> str:
 
 
 class Account(models.Model):
-    class Currency(models.TextChoices):
-        KES = "KES", "Kenyan Shilling"
-        USD = "USD", "US Dollar"
-        EUR = "EUR", "Euro"
-        GBP = "GBP", "British Pound"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="accounts")
+    # Set for business wallets. Members reach them through organizations.*, never the personal endpoints;
+    # `owner` is then just the member who opened the wallet.
+    organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.PROTECT, null=True, blank=True, related_name="accounts"
+    )
     account_number = models.CharField(max_length=10, unique=True, default=generate_account_number, editable=False)
     name = models.CharField(max_length=60, default="Main Wallet")
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    # A platform_settings.Currency code; validated against the enabled currencies when a wallet is opened.
+    currency = models.CharField(max_length=3)
     balance = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal("0.00"), validators=[MinValueValidator(Decimal("0.00"))]
     )
     is_active = models.BooleanField(default=True)
-    # Set only on FluxPay's own clearing accounts (e.g. "clearing:MPESA:KES"); never on customer wallets.
+    # Set only on FluxPay's own clearing accounts (e.g. "clearing:PAYPAL:USD"); never on customer wallets.
     system_key = models.CharField(max_length=40, unique=True, null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

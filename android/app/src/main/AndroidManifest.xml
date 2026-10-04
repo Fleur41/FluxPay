@@ -69,5 +69,16 @@
                 <data android:path="/reset-password" />
             </intent-filter>
         </activity>
+
+        <!-- Lets other apps open or receive a downloaded statement, one granted file at a time. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

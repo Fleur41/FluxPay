@@ -9,7 +9,8 @@ data class DashboardSummary(
     val accounts: List<Account>,
     /** Sum of the balances held in the user's preferred currency. */
     val totalBalance: BigDecimal,
-    val totalCurrency: String,
+    /** Null until a wallet has synced: there is no currency to total in yet. */
+    val totalCurrency: String?,
     /** Accounts in other currencies aren't converted — we just say how many there are. */
     val otherCurrencyAccounts: Int,
     val recentTransactions: List<Transaction>,

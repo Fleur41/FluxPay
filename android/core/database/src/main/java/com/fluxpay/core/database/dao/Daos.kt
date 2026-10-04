@@ -5,8 +5,10 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.fluxpay.core.database.entity.AccountEntity
+import com.fluxpay.core.database.entity.BudgetLineEntity
 import com.fluxpay.core.database.entity.TransactionEntity
 import com.fluxpay.core.database.entity.UserEntity
+import java.math.BigDecimal
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -71,6 +73,15 @@ abstract class TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id")
     abstract fun observeTransaction(id: String): Flow<TransactionEntity?>
 
+    /** Amounts of completed money-out lines in [fromMillis, toMillis). Summed by the caller: amounts are TEXT. */
+    @Query(
+        """
+        SELECT amount FROM transactions
+        WHERE type = 'DEBIT' AND status = 'COMPLETED' AND created_at >= :fromMillis AND created_at < :toMillis
+        """,
+    )
+    abstract fun observeDebitAmounts(fromMillis: Long, toMillis: Long): Flow<List<BigDecimal>>
+
     @Upsert
     abstract suspend fun upsertAll(transactions: List<TransactionEntity>)
 
@@ -85,4 +96,19 @@ abstract class TransactionDao {
         clear()
         upsertAll(transactions)
     }
+}
+
+@Dao
+interface BudgetDao {
+    @Query("SELECT * FROM budget_lines ORDER BY created_at, id")
+    fun observeLines(): Flow<List<BudgetLineEntity>>
+
+    @Upsert
+    suspend fun upsert(line: BudgetLineEntity)
+
+    @Query("SELECT * FROM budget_lines WHERE id = :id")
+    suspend fun find(id: Long): BudgetLineEntity?
+
+    @Query("DELETE FROM budget_lines WHERE id = :id")
+    suspend fun delete(id: Long)
 }

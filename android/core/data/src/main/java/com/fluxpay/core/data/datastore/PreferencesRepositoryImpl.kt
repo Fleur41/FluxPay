@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
-import com.fluxpay.core.common.util.Constants
 import com.fluxpay.core.data.di.SettingsDataStore
 import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.domain.model.UserPreferences
@@ -29,7 +28,7 @@ class PreferencesRepositoryImpl @Inject constructor(
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { prefs ->
             UserPreferences(
-                currency = prefs[CURRENCY] ?: Constants.DEFAULT_CURRENCY,
+                currency = prefs[CURRENCY],
                 themeMode = prefs[THEME]?.let { name -> ThemeMode.entries.firstOrNull { it.name == name } }
                     ?: ThemeMode.SYSTEM,
                 hideBalances = prefs[HIDE_BALANCES] ?: false,

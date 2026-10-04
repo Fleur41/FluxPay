@@ -44,3 +44,14 @@ data class TransactionEntity(
     val reference: String,
     @ColumnInfo(name = "created_at") val createdAt: Instant,
 )
+
+/** The budget planner's lines. Typed in by the user, so unlike the server caches it needs real migrations. */
+@Entity(tableName = "budget_lines")
+data class BudgetLineEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val label: String,
+    val amount: BigDecimal,
+    /** BudgetKind name: INCOME, NEEDS, WANTS or SAVINGS. */
+    val kind: String,
+    @ColumnInfo(name = "created_at") val createdAt: Instant,
+)
