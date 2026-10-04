@@ -21,7 +21,7 @@ FluxPay/
 | **Statements** | PDF or CSV account statements for a date range, shared from the app |
 | **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
 | **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
-| **Business accounts** | Organizations with members, invitations, shared wallets, payment requests that need approval, and an audit log (API) |
+| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, typed payments to workers and suppliers with approval and reversal, payroll, and an audit log (API) |
 | **Receive** | Share your name and account number from the dashboard so people can pay you |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
 | **Admin dashboard** | Staff back-office at `/admin/`: KPIs, customer balances, wallet top-ups and corrections, business oversight, alerts, audit log and platform rules ([guide](#admin-dashboard)) |
@@ -231,7 +231,7 @@ A label next to the FluxPay name shows **Development** (yellow) or **Production*
 | **Audit log** | Tamper check: confirms no audit record has been altered or removed |
 | **Recent top-ups & corrections** | The last six, with who posted them |
 
-Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Payment approvals**, **Payments** and **Email & SMS alerts** when something is waiting.
+Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Business payments**, **Payments** and **Email & SMS alerts** when something is waiting.
 
 ### What each screen is for
 
@@ -243,7 +243,7 @@ Staff only see the panels and menu items their permissions allow. The sidebar sh
 | | **Transactions** | Every ledger line, filterable by type, category, status and date; search by reference |
 | | **Transfers** | Every customer-to-customer transfer |
 | Businesses | **Businesses** | Suspend or reactivate a business; see its members and approval threshold |
-| | **Payment approvals** | Business payments and their approval status. Approving is done by the business's own approvers in the app, not by staff |
+| | **Business payments** | Every payment out of a business cashbook (salaries, allowances, supplier payments...) with its type, status and reference. Approving is done by the business's own approvers in the app, not by staff |
 | | **Invitations** | Pending, accepted and expired invitations |
 | External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review** |
 | | **Provider callbacks** | Raw callbacks received from providers, and what happened to each |
@@ -318,9 +318,14 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET, PATCH/DELETE | `organizations/{id}/members/` , `…/members/{member_id}/` | members and their roles |
 | GET/POST, DELETE | `organizations/{id}/invitations/` , `…/invitations/{invitation_id}/` | invite by email; revoke |
 | POST | `invitations/accept/` | join a business with an invitation token |
-| GET | `organizations/{id}/accounts/` , `…/transactions/` , `…/statements/` , `…/audit-events/` | business wallets, history, statements and audit log |
-| GET/POST | `organizations/{id}/payment-requests/` | payment requests |
-| POST | `organizations/{id}/payment-requests/{request_id}/{approve\|reject\|cancel}/` | decide on a payment request |
+| GET | `organizations/{id}/accounts/` , `…/transactions/` , `…/statements/` , `…/audit-events/` | the business cashbook (its one wallet), history, statements and audit log |
+| GET/POST | `organizations/{id}/payments/?status=&type=&worker=&pay_run=` | every payment out of the cashbook (`pay_run=none`: only one-off payments). POST `{type, worker_id \| destination_account_number, amount, note, books_category?, idempotency_key}`; `type` is `SALARY`, `ALLOWANCE`, `BONUS`, `COMMISSION`, `OTHER_WORKER` (need `worker_id`), or `SUPPLIER`, `VENDOR`, `CONTRACTOR`, `EXPENSE`, `OTHER` (need an account number) |
+| POST | `organizations/{id}/payments/{payment_id}/{approve\|reject\|cancel}/` | decide on a payment waiting for approval (`{note}`) |
+| POST | `organizations/{id}/payments/{payment_id}/reverse/` | take back a paid payment, `{reason}`; owners and admins, within the reversal window |
+| GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
+| POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
+| POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |
+| GET | `payslips/` | a worker's own pay from every business: pay-run lines and one-off salaries, bonuses... (`status` is `PAID` or `REVERSED`) |
 
 Outside `/api/v1/`: `GET /health/` (public) and `POST /hooks/<rail>/<token>/` (payment provider callbacks).
 
