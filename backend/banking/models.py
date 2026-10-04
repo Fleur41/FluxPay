@@ -68,6 +68,7 @@ class Transaction(models.Model):
         DEPOSIT = "DEPOSIT", "Deposit"
         WITHDRAWAL = "WITHDRAWAL", "Withdrawal"
         WITHDRAWAL_REVERSAL = "WITHDRAWAL_REVERSAL", "Withdrawal returned"
+        ADJUSTMENT = "ADJUSTMENT", "Adjustment by FluxPay"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -112,3 +113,36 @@ class Transfer(models.Model):
         constraints = [
             models.UniqueConstraint(fields=("initiated_by", "idempotency_key"), name="unique_transfer_idempotency"),
         ]
+
+
+class ManualAdjustment(models.Model):
+    """Money a staff member added to (top-up) or took back from (correction) a wallet, with the reason.
+
+    Posted double-entry against the "Manual adjustments" system account by banking.services.post_adjustment.
+    Never edited or deleted: a mistake is fixed with an opposite adjustment.
+    """
+
+    class Kind(models.TextChoices):
+        CREDIT = "CREDIT", "Top-up (add money)"
+        DEBIT = "DEBIT", "Correction (take money back)"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="adjustments")
+    kind = models.CharField(max_length=6, choices=Kind.choices)
+    amount = models.DecimalField(
+        max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    reason = models.CharField(
+        max_length=255, help_text="Why, for the audit trail, e.g. \"Cash deposited at the Nairobi office, receipt 1042\"."
+    )
+    reference = models.CharField(max_length=24, unique=True)
+    balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        permissions = [("post_adjustment", "Can top up or correct customer wallets")]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.amount} on {self.account.account_number} ({self.reference})"

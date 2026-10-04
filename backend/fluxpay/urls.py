@@ -4,6 +4,8 @@ from django.urls import include, path
 
 from payments.views import WebhookView
 
+admin.site.index_title = "Dashboard"  # header of the back-office home page
+
 
 def health(_request):
     return JsonResponse({"status": "ok"})

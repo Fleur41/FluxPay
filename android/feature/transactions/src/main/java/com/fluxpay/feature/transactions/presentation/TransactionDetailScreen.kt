@@ -141,6 +141,7 @@ private fun TransactionCategory.label() = when (this) {
     TransactionCategory.DEPOSIT -> "Deposit"
     TransactionCategory.WITHDRAWAL -> "Withdrawal"
     TransactionCategory.WITHDRAWAL_REVERSAL -> "Money returned"
+    TransactionCategory.ADJUSTMENT -> "Top-up / correction by FluxPay"
     TransactionCategory.UNKNOWN -> "Other"
 }
 

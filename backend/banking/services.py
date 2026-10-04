@@ -10,8 +10,8 @@ from audit.services import record
 from fluxpay.exceptions import BusinessError
 from platform_settings import services as rules
 
-from .models import Account, Transaction, Transfer
-from .signals import transfer_completed
+from .models import Account, ManualAdjustment, Transaction, Transfer
+from .signals import adjustment_posted, transfer_completed
 
 
 def new_reference() -> str:
@@ -55,6 +55,82 @@ def open_wallet(user, currency: str | None = None, name: str = "Main Wallet") ->
                 reference=reference,
             )
     return account
+
+
+def post_adjustment(*, staff, account_id, kind: str, amount: Decimal, reason: str) -> ManualAdjustment:
+    """A staff top-up (CREDIT) or correction (DEBIT) of a customer or business wallet.
+
+    The money comes from, or goes back to, the "Manual adjustments" system account, so the ledger still
+    balances. The currency's per-transaction limits apply (a guard against typing an extra zero), and a
+    correction can never take a wallet below zero. Permission is checked by the caller (the admin).
+    """
+    reason = (reason or "").strip()
+    if len(reason) < 10:
+        raise BusinessError("Give a reason of at least 10 characters for the audit trail.", "reason_required")
+    target = Account.objects.filter(id=account_id, system_key__isnull=True).first()
+    if target is None:
+        raise BusinessError("Customer wallet not found.", "account_not_found", status.HTTP_404_NOT_FOUND)
+    if not target.is_active:
+        raise BusinessError("This wallet is closed.", "account_inactive")
+    rules.check_amount(amount, target.currency)
+    pool = system_account(f"adjustments:{target.currency}", f"Manual adjustments {target.currency}", target.currency)
+
+    with db_transaction.atomic():
+        rows = Account.objects.select_for_update().filter(id__in=[target.id, pool.id]).order_by("id")
+        locked = {a.id: a for a in rows}
+        target, pool = locked[target.id], locked[pool.id]
+        credit = kind == ManualAdjustment.Kind.CREDIT
+        if not credit and target.balance < amount:
+            raise BusinessError(
+                f"The wallet only holds {target.balance:,.2f} {target.currency}; "
+                "a correction can't take it below zero.",
+                "insufficient_funds",
+            )
+        source, destination = (pool, target) if credit else (target, pool)
+        source.balance -= amount
+        destination.balance += amount
+        source.save(update_fields=["balance", "updated_at"])
+        destination.save(update_fields=["balance", "updated_at"])
+
+        reference = new_reference()
+        description = "Top-up by FluxPay" if credit else "Correction by FluxPay"
+        for line_account, side in ((source, Transaction.Type.DEBIT), (destination, Transaction.Type.CREDIT)):
+            on_wallet = line_account.id == target.id
+            Transaction.objects.create(
+                account=line_account,
+                type=side,
+                category=Transaction.Category.ADJUSTMENT,
+                amount=amount,
+                balance_after=line_account.balance,
+                counterparty_name="FluxPay" if on_wallet else holder_name(target),
+                counterparty_account="" if on_wallet else target.account_number,
+                description=description,
+                reference=reference,
+            )
+        adjustment = ManualAdjustment.objects.create(
+            account=target,
+            kind=kind,
+            amount=amount,
+            reason=reason,
+            reference=reference,
+            balance_after=target.balance,
+            created_by=staff,
+        )
+        record(
+            "adjustment.credited" if credit else "adjustment.debited",
+            actor=staff,
+            organization_id=target.organization_id,
+            target=adjustment,
+            metadata={
+                "account": target.account_number,
+                "amount": str(amount),
+                "currency": target.currency,
+                "reason": reason,
+                "reference": reference,
+            },
+        )
+        adjustment_posted.send(sender=ManualAdjustment, adjustment=adjustment)
+    return adjustment
 
 
 def system_account(key: str, name: str, currency: str) -> Account:

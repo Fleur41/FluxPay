@@ -34,6 +34,7 @@ class ObserveDashboardUseCase @Inject constructor(
         val inCurrency = accounts.filter { it.currency == currency }
         DashboardSummary(
             firstName = user?.fullName?.substringBefore(' ').orEmpty(),
+            holderName = user?.fullName.orEmpty(),
             accounts = accounts,
             totalBalance = inCurrency.fold(BigDecimal.ZERO) { sum, account -> sum + account.balance },
             totalCurrency = currency,

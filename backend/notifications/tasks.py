@@ -13,6 +13,11 @@ def alert_payment_task(payment_id):
     services.alert_payment(payment_id)
 
 
+@shared_task
+def alert_adjustment_task(adjustment_id):
+    services.alert_adjustment(adjustment_id)
+
+
 @shared_task(bind=True, max_retries=services.MAX_ATTEMPTS)
 def deliver_notification(self, notification_id):
     try:

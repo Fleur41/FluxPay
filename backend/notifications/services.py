@@ -14,7 +14,7 @@ from django.core.mail import send_mail
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
-from banking.models import Account, Transaction, Transfer
+from banking.models import Account, ManualAdjustment, Transaction, Transfer
 from banking.services import holder_name
 from organizations.models import Membership
 from payments.models import ExternalPayment, rail_label
@@ -133,6 +133,34 @@ def alert_payment(payment_id) -> list[Notification]:
     else:
         return []
     return _queue_for(payment.account, alert)
+
+
+def alert_adjustment(adjustment_id) -> list[Notification]:
+    """Tells the wallet's people about a staff top-up or correction."""
+    adjustment = ManualAdjustment.objects.select_related("account__owner", "account__organization").get(
+        id=adjustment_id
+    )
+    account, ref = adjustment.account, adjustment.reference
+    amount = _money(adjustment.amount, account.currency)
+    balance = _money(adjustment.balance_after, account.currency)
+    when = _local_time(adjustment.created_at)
+    wallet = "your wallet" if account.organization_id is None else f"{account.organization.name}'s wallet"
+    masked = _mask(account.account_number)
+    if adjustment.kind == ManualAdjustment.Kind.CREDIT:
+        alert = Alert(
+            "adjustment.credited", ref, f"FluxPay added {amount} to {wallet}",
+            f"FluxPay added {amount} to {wallet} ({masked}) on {when}.\n\nReference: {ref}\nNew balance: {balance}\n",
+            f"FluxPay: {amount} added to {wallet} ({masked}) on {when}. Ref {ref}. Bal {balance}.",
+        )
+    else:
+        alert = Alert(
+            "adjustment.debited", ref, f"FluxPay corrected {wallet}: {amount} deducted",
+            f"FluxPay corrected {wallet} ({masked}) on {when}: {amount} was deducted.\n"
+            "Questions? Contact FluxPay support with the reference below.\n\n"
+            f"Reference: {ref}\nNew balance: {balance}\n",
+            f"FluxPay: {amount} deducted from {wallet} ({masked}) as a correction on {when}. Ref {ref}. Bal {balance}.",
+        )
+    return _queue_for(account, alert)
 
 
 # --- Queueing and delivery ----------------------------------------------------------------------

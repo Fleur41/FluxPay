@@ -2,7 +2,7 @@
 from django.db import transaction as db_transaction
 from django.dispatch import receiver
 
-from banking.signals import transfer_completed
+from banking.signals import adjustment_posted, transfer_completed
 from payments.signals import payment_settled
 
 
@@ -20,3 +20,11 @@ def on_payment_settled(sender, payment, **kwargs):
 
     payment_id = str(payment.id)
     db_transaction.on_commit(lambda: alert_payment_task.delay(payment_id), robust=True)
+
+
+@receiver(adjustment_posted)
+def on_adjustment_posted(sender, adjustment, **kwargs):
+    from .tasks import alert_adjustment_task
+
+    adjustment_id = str(adjustment.id)
+    db_transaction.on_commit(lambda: alert_adjustment_task.delay(adjustment_id), robust=True)
