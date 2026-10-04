@@ -49,6 +49,16 @@ class InvalidCallback(Exception):
 class PaymentProvider(ABC):
     #: Currencies this provider settles in; None means any wallet currency.
     currencies: frozenset[str] | None = None
+    #: True when amounts must be whole units (M-Pesa takes whole shillings).
+    whole_units_only: bool = False
+    #: False when submitting the same payout twice could pay twice. payments.services then never resubmits
+    #: a payout whose first attempt went unanswered; it is flagged for staff instead.
+    payouts_idempotent: bool = True
+
+    @classmethod
+    def can_pay_out(cls) -> bool:
+        """False when this server isn't set up to send payouts on the rail (e.g. missing credentials)."""
+        return True
 
     @abstractmethod
     def start_deposit(self, payment) -> SubmitResult:

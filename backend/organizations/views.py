@@ -10,6 +10,8 @@ from banking.filters import TransactionFilter
 from banking.models import Account, Transaction
 from banking.serializers import AccountSerializer, TransactionSerializer
 from banking.views import statement_response
+from payments.models import ExternalPayment
+from payments.serializers import ExternalPaymentSerializer, MpesaAmountSerializer
 
 from . import beneficiaries, services
 from .models import Beneficiary, Invitation, Membership, Payment
@@ -181,7 +183,7 @@ class PaymentListCreateView(OrgScopedMixin, generics.ListAPIView):
 
     def get_queryset(self):
         payments = Payment.objects.select_related(
-            "source_account", "created_by", "decided_by", "reversal"
+            "source_account", "created_by", "decided_by", "reversal", "external_payment"
         ).filter(organization_id=self.membership.organization_id)
         params = self.request.query_params
         for field in ("status", "type"):
@@ -237,6 +239,46 @@ class PaymentActionView(OrgScopedMixin, APIView):
             decide = services.approve_payment if action == "approve" else services.reject_payment
             payment = decide(membership=self.membership, payment_id=payment_id, note=serializer.validated_data["note"])
         return Response(PaymentSerializer(payment).data)
+
+
+class MpesaDepositView(OrgScopedMixin, APIView):
+    """POST /organizations/<id>/deposits/mpesa/ — an STK Push to `phone_number`; the cashbook is credited once
+    M-Pesa confirms. Answers 202; follow it at .../external-payments/<id>/."""
+
+    perm = Perm.INITIATE_PAYMENT
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "deposits"
+
+    def post(self, request, org_id):
+        serializer = MpesaAmountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payment, created = services.deposit_by_mpesa(membership=self.membership, **serializer.validated_data)
+        payment.refresh_from_db()  # the submit may already have run (inline mode)
+        return Response(
+            ExternalPaymentSerializer(payment).data, status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
+        )
+
+
+class ExternalPaymentListView(OrgScopedMixin, generics.ListAPIView):
+    """GET /organizations/<id>/external-payments/ — money in and out of the cashbook by M-Pesa or bank."""
+
+    serializer_class = ExternalPaymentSerializer
+    filterset_fields = ("rail", "direction", "status")
+
+    def get_queryset(self):
+        return ExternalPayment.objects.select_related("account").filter(
+            account__organization_id=self.membership.organization_id
+        )
+
+
+class ExternalPaymentDetailView(OrgScopedMixin, generics.RetrieveAPIView):
+    serializer_class = ExternalPaymentSerializer
+    lookup_url_kwarg = "payment_id"
+
+    def get_queryset(self):
+        return ExternalPayment.objects.select_related("account").filter(
+            account__organization_id=self.membership.organization_id
+        )
 
 
 class BeneficiaryMixin(OrgScopedMixin):

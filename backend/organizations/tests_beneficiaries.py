@@ -119,10 +119,10 @@ class BeneficiaryTests(BusinessTestCase):
         res = self.change(self.owner, beneficiary, method="MPESA_TILL", till_number="5123456")
         self.assertEqual(res.data["details"], {"till_number": "5123456"})  # the paybill details are gone
 
-    def test_mpesa_and_bank_beneficiaries_cant_be_paid_yet(self):
+    def test_mpesa_beneficiary_cant_be_paid_when_mpesa_isnt_set_up(self):
         beneficiary = self.add(self.owner, method="MPESA_MOBILE", mpesa_phone="0712345678").data["id"]
         self.verify(self.owner, beneficiary)
-        self.assertEqual(self.pay(self.owner, beneficiary).data["error"]["code"], "payout_method_unavailable")
+        self.assertEqual(self.pay(self.owner, beneficiary).data["error"]["code"], "rail_unavailable")
 
     def test_viewers_see_masked_details_and_other_businesses_nothing(self):
         number = personal_wallet(self.outsider).account_number

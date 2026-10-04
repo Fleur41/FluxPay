@@ -266,6 +266,14 @@ def dashboard_callback(request, context):
             "link": reverse("admin:payments_externalpayment_changelist") + "?needs_review__exact=1",
         },
         {
+            "perm": "payments.settle_payout",
+            "title": "Bank payouts waiting to be sent by staff",
+            "count": ExternalPayment.objects.filter(
+                rail="BANK", direction="OUT", status__in=["HELD", "SUBMITTED"]
+            ).count(),
+            "link": reverse("admin:payments_externalpayment_changelist") + "?queue=bank",
+        },
+        {
             "perm": "notifications.view_notification",
             "title": "Alerts that failed to send",
             "count": Notification.objects.filter(status=Notification.Status.FAILED).count(),

@@ -96,6 +96,7 @@ class Beneficiary(models.Model):
         LANDLORD = "LANDLORD", "Landlord"
         SERVICE_PROVIDER = "SERVICE_PROVIDER", "Service provider"
         UTILITY = "UTILITY", "Utility"
+        OWN_ACCOUNT = "OWN_ACCOUNT", "The business's own account"  # where its withdrawals go
         OTHER = "OTHER", "Other"
 
     class Method(models.TextChoices):
@@ -185,6 +186,7 @@ class Payment(models.Model):
         VENDOR = "VENDOR", "Vendor payment"
         CONTRACTOR = "CONTRACTOR", "Contractor payment"
         EXPENSE = "EXPENSE", "Business expense"
+        WITHDRAWAL = "WITHDRAWAL", "Withdrawal"  # the owners taking money out of the business
         OTHER = "OTHER", "Other payment"
 
     WORKER_TYPES = (Type.SALARY, Type.ALLOWANCE, Type.BONUS, Type.COMMISSION, Type.OTHER_WORKER)
@@ -192,7 +194,7 @@ class Payment(models.Model):
     class Status(models.TextChoices):
         PENDING_APPROVAL = "PENDING_APPROVAL", "Waiting for approval"
         PENDING = "PENDING", "Not paid yet"
-        # The money has left the cashbook but hasn't reached the recipient yet (external rails).
+        # The money has left the cashbook but M-Pesa or the bank hasn't confirmed it reached the recipient.
         PROCESSING = "PROCESSING", "Processing"
         COMPLETED = "COMPLETED", "Paid"
         FAILED = "FAILED", "Failed"
@@ -218,7 +220,7 @@ class Payment(models.Model):
     pay_run = models.ForeignKey(
         "payroll.PayRun", on_delete=models.PROTECT, null=True, blank=True, related_name="payslips"
     )
-    destination_account_number = models.CharField(max_length=10)
+    destination_account_number = models.CharField(max_length=10, blank=True)  # FluxPay recipients only
     recipient_name = models.CharField(max_length=150)  # as it was when the payment was made
     amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     note = models.CharField(max_length=140, blank=True)
@@ -234,6 +236,10 @@ class Payment(models.Model):
     decision_note = models.CharField(max_length=255, blank=True)
     transfer = models.OneToOneField(
         "banking.Transfer", on_delete=models.PROTECT, null=True, blank=True, related_name="payment"
+    )
+    # Set instead of `transfer` when the money went out by M-Pesa or bank (a beneficiary without FluxPay).
+    external_payment = models.OneToOneField(
+        "payments.ExternalPayment", on_delete=models.PROTECT, null=True, blank=True, related_name="business_payment"
     )
     failure_reason = models.CharField(max_length=255, blank=True)
     reversal = models.OneToOneField(

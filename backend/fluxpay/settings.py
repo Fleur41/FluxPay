@@ -174,13 +174,37 @@ PASSWORD_RESET_LINK = os.environ.get("PASSWORD_RESET_LINK", "fluxpay://reset-pas
 ORG_INVITE_LINK = os.environ.get("ORG_INVITE_LINK", "fluxpay://join-business?token={token}")
 
 # External payments (payments app)
-# Rail -> provider adapter class. No rail is enabled yet; the fake provider exists only in tests.
+# Rail -> provider adapter class. A rail is enabled below once it is configured; the fake one exists only in tests.
 FLUXPAY_PAYMENT_PROVIDERS = {}
+# Public https base URL of this API; payment providers send callbacks to it.
+FLUXPAY_PUBLIC_URL = os.environ.get("FLUXPAY_PUBLIC_URL", "")
 # Secret path segment in every callback URL (/hooks/<rail>/<token>/). Empty disables all callbacks.
 FLUXPAY_WEBHOOK_TOKEN = os.environ.get("FLUXPAY_WEBHOOK_TOKEN", "dev-webhook-token" if DEBUG else "")
 FLUXPAY_STATUS_CHECK_AFTER_SECONDS = int(os.environ.get("FLUXPAY_STATUS_CHECK_AFTER_SECONDS", "120"))
 FLUXPAY_DEPOSIT_EXPIRY_MINUTES = int(os.environ.get("FLUXPAY_DEPOSIT_EXPIRY_MINUTES", "30"))
+# A payout with no outcome after this long is flagged for staff to check (it is never failed on silence).
+FLUXPAY_PAYOUT_REVIEW_AFTER_HOURS = int(os.environ.get("FLUXPAY_PAYOUT_REVIEW_AFTER_HOURS", "24"))
 FLUXPAY_WEBHOOK_MATCH_RETRIES = 5
+
+# M-Pesa (Safaricom Daraja). STK Push deposits need the consumer key/secret, passkey and a public URL;
+# payouts (B2C to phones, B2B to paybills and tills) also need an initiator and its security credential
+# (the initiator password encrypted with Safaricom's certificate, as the Daraja portal generates it).
+MPESA_ENV = os.environ.get("MPESA_ENV", "sandbox")
+if MPESA_ENV not in {"sandbox", "production"}:
+    raise RuntimeError("MPESA_ENV must be 'sandbox' or 'production'")
+MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
+MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")  # Daraja's sandbox test Paybill
+MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
+MPESA_PAYOUT_SHORTCODE = os.environ.get("MPESA_PAYOUT_SHORTCODE", "") or MPESA_SHORTCODE
+MPESA_INITIATOR_NAME = os.environ.get("MPESA_INITIATOR_NAME", "")
+MPESA_SECURITY_CREDENTIAL = os.environ.get("MPESA_SECURITY_CREDENTIAL", "")
+if all((MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_PASSKEY, FLUXPAY_PUBLIC_URL)):
+    FLUXPAY_PAYMENT_PROVIDERS["MPESA"] = "payments.providers.mpesa.MpesaProvider"
+# Bank payouts are sent by FluxPay staff from the bank and confirmed in the admin (there is no bank API).
+# Only switch this on when someone works the queue.
+if env_bool("FLUXPAY_BANK_PAYOUTS", DEBUG):
+    FLUXPAY_PAYMENT_PROVIDERS["BANK"] = "payments.providers.bank.ManualBankProvider"
 # Transaction alerts (notifications app). Times in alerts and statements are shown in this zone.
 FLUXPAY_DISPLAY_TIMEZONE = os.environ.get("FLUXPAY_DISPLAY_TIMEZONE", "Africa/Nairobi")
 # SMS: Africa's Talking once an API key is set, otherwise printed to the log.

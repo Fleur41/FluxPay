@@ -9,6 +9,7 @@ from banking.models import Account
 
 
 class Rail(models.TextChoices):
+    MPESA = "MPESA", "M-Pesa"
     PAYPAL = "PAYPAL", "PayPal"
     BANK = "BANK", "Bank transfer"
     FAKE = "FAKE", "Fake (tests only)"
@@ -36,9 +37,13 @@ class ExternalPayment(models.Model):
         OUT = "OUT", "Withdrawal"
 
     class Method(models.TextChoices):
+        MPESA_STK = "MPESA_STK", "M-Pesa STK Push"
+        MPESA_B2C = "MPESA_B2C", "M-Pesa to a phone"
+        MPESA_PAYBILL = "MPESA_PAYBILL", "M-Pesa to a paybill"
+        MPESA_TILL = "MPESA_TILL", "M-Pesa to a till"
         PAYPAL_ORDER = "PAYPAL_ORDER", "PayPal Checkout"
         PAYPAL_PAYOUT = "PAYPAL_PAYOUT", "PayPal Payout"
-        BANK_OUT = "BANK_OUT", "Bank payout"
+        BANK_OUT = "BANK_OUT", "Bank payout (sent by FluxPay staff)"
         FAKE_IN = "FAKE_IN", "Fake deposit"
         FAKE_OUT = "FAKE_OUT", "Fake payout"
 
@@ -68,7 +73,7 @@ class ExternalPayment(models.Model):
     reference = models.CharField(max_length=24, unique=True)
     provider_ref = models.CharField(max_length=64, blank=True)
     idempotency_key = models.CharField(max_length=64, blank=True)
-    # Provider-specific details (phone number, PayPal order id, fake outcome). Not for secrets.
+    # Provider-specific details (phone number, paybill, bank account, M-Pesa receipt, fake outcome). Not for secrets.
     metadata = models.JSONField(default=dict, blank=True)
     failure_reason = models.CharField(max_length=255, blank=True)
     # Set when the provider's record disagrees with ours (amount, currency); no money moves until a person looks.
@@ -93,6 +98,7 @@ class ExternalPayment(models.Model):
             ),
         ]
         indexes = [models.Index(fields=("status", "updated_at"))]
+        permissions = [("settle_payout", "Can confirm or fail payouts by hand (bank payouts, unanswered M-Pesa)")]
 
     def __str__(self) -> str:
         return f"{self.reference} {self.direction} {self.amount} {self.currency} ({self.status})"

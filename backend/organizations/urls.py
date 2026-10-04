@@ -25,6 +25,17 @@ urlpatterns = [
         views.PaymentActionView.as_view(),
         name="org-payment-action",
     ),
+    path("organizations/<uuid:org_id>/deposits/mpesa/", views.MpesaDepositView.as_view(), name="org-deposit-mpesa"),
+    path(
+        "organizations/<uuid:org_id>/external-payments/",
+        views.ExternalPaymentListView.as_view(),
+        name="org-external-payments",
+    ),
+    path(
+        "organizations/<uuid:org_id>/external-payments/<uuid:payment_id>/",
+        views.ExternalPaymentDetailView.as_view(),
+        name="org-external-payment-detail",
+    ),
     path(
         "organizations/<uuid:org_id>/beneficiaries/",
         views.BeneficiaryListCreateView.as_view(),

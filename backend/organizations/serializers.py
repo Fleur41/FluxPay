@@ -77,6 +77,15 @@ class PaymentSerializer(serializers.ModelSerializer):
     created_by = serializers.EmailField(source="created_by.email", read_only=True)
     decided_by = serializers.EmailField(source="decided_by.email", read_only=True, default=None)
     reversal_reference = serializers.CharField(source="reversal.reference", read_only=True, default=None)
+    # Paid by M-Pesa or bank: how, and the provider's receipt once it is confirmed.
+    payout_method = serializers.CharField(source="external_payment.get_method_display", read_only=True, default=None)
+    payout_receipt = serializers.SerializerMethodField()
+
+    def get_payout_receipt(self, payment) -> str | None:
+        if not payment.external_payment_id:
+            return None
+        meta = payment.external_payment.metadata
+        return meta.get("provider_receipt") or meta.get("bank_reference") or None
 
     class Meta:
         model = Payment
@@ -107,6 +116,8 @@ class PaymentSerializer(serializers.ModelSerializer):
             "reversed_at",
             "reversal_reason",
             "reversal_reference",
+            "payout_method",
+            "payout_receipt",
         )
         read_only_fields = fields
 

@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
+from django.dispatch import receiver
 from django.utils import timezone
 from rest_framework import status
 
@@ -27,6 +28,9 @@ from banking.services import (
     transfer_from_organization,
 )
 from fluxpay.exceptions import BusinessError
+from payments import services as payment_services
+from payments.providers import get_provider
+from payments.signals import payment_settled
 from payroll.models import Worker
 from platform_settings import services as rules
 
@@ -243,7 +247,15 @@ BOOKS_ROLE = {
     T.VENDOR: "suppliers",
     T.CONTRACTOR: "contractors",
     T.EXPENSE: "expenses",
+    T.WITHDRAWAL: "drawings",
     T.OTHER: "expenses",
+}
+# How each external payout method is sent: (rail, payments.ExternalPayment.Method).
+PAYOUT_METHODS = {
+    Beneficiary.Method.MPESA_MOBILE: ("MPESA", "MPESA_B2C"),
+    Beneficiary.Method.MPESA_PAYBILL: ("MPESA", "MPESA_PAYBILL"),
+    Beneficiary.Method.MPESA_TILL: ("MPESA", "MPESA_TILL"),
+    Beneficiary.Method.BANK: ("BANK", "BANK_OUT"),
 }
 
 
@@ -278,15 +290,20 @@ def create_payment(*, membership: Membership, amount: Decimal, note: str, idempo
         books_category = books_category or beneficiary.books_category
         if type in Payment.WORKER_TYPES:
             raise BusinessError("Salaries and other worker payments go to a worker, not a beneficiary.", "invalid_type")
-        if beneficiary.method != Beneficiary.Method.FLUXPAY:
-            raise BusinessError(
-                f"Paying by {beneficiary.get_method_display()} isn't available yet; only FluxPay accounts can be paid.",
-                "payout_method_unavailable",
-            )
+        if beneficiary.method in PAYOUT_METHODS:  # fail now, not after approval, if the rail can't take it
+            rail = PAYOUT_METHODS[beneficiary.method][0]
+            payment_services.check_payable_amount(rail, amount, source.currency)
+            if not get_provider(rail).can_pay_out():
+                raise BusinessError(f"Payouts by {beneficiary.get_method_display()} aren't available yet.", "rail_unavailable")
         destination_account_number = beneficiary.account_number
     if not type:
         raise BusinessError("Choose what the payment is for.", "type_required")
-    worker, recipient = _recipient(organization, type, worker_id, destination_account_number)
+    if type == T.WITHDRAWAL and not has_perm(membership.role, Perm.WITHDRAW):
+        raise BusinessError("Only an owner can take money out of the business.", "permission_denied", 403)
+    if beneficiary and beneficiary.method in PAYOUT_METHODS:
+        worker, recipient = None, None
+    else:
+        worker, recipient = _recipient(organization, type, worker_id, destination_account_number)
 
     try:
         with db_transaction.atomic():
@@ -297,7 +314,7 @@ def create_payment(*, membership: Membership, amount: Decimal, note: str, idempo
                 worker=worker,
                 beneficiary=beneficiary,
                 beneficiary_details=beneficiary.payout_details() if beneficiary else {},
-                destination_account_number=recipient.account_number,
+                destination_account_number=recipient.account_number if recipient else "",
                 recipient_name=beneficiary.name if beneficiary else holder_name(recipient),
                 amount=amount,
                 note=note,
@@ -357,16 +374,29 @@ def cancel_payment(*, membership: Membership, payment_id) -> Payment:
     return payment
 
 
+def deposit_by_mpesa(*, membership: Membership, phone_number: str, amount: Decimal, idempotency_key: str):
+    """Sends an STK Push to `phone_number`; the cashbook is credited once M-Pesa confirms. Returns (payment, created)."""
+    return payment_services.deposit_into(
+        cashbook(membership.organization), initiator=membership.user, rail="MPESA", method="MPESA_STK",
+        amount=amount, idempotency_key=idempotency_key, metadata={"phone_number": phone_number},
+    )  # fmt: skip
+
+
 def send_payment(payment: Payment, *, actor) -> None:
     """Moves the money for one PENDING payment (its row locked by the caller) and marks it paid.
 
     Raises BusinessError if it can't be paid: a payment on its own then fails by itself (`_execute`), while a
     pay run is paid all or nothing. A pay run's payslips are booked as payroll, one cashbook line each.
+    A beneficiary paid by M-Pesa or bank: the money leaves the cashbook now and the payment is PROCESSING
+    until the provider confirms it (`on_payout_settled`).
     """
     in_run = payment.pay_run_id is not None
     if payment.beneficiary_id:  # still verified, and still the details it was created with
         beneficiary = Beneficiary.objects.select_for_update().get(pk=payment.beneficiary_id)  # vs. an edit right now
         beneficiaries.check_payable(beneficiary, payment.beneficiary_details)
+        if beneficiary.method in PAYOUT_METHODS:
+            _send_payout(payment, beneficiary, actor=actor)
+            return
     transfer, _debit, _created = transfer_from_organization(
         initiator=actor,
         organization=payment.organization,
@@ -389,6 +419,44 @@ def send_payment(payment: Payment, *, actor) -> None:
     payment.save(update_fields=["status", "transfer", "completed_at", "updated_at"])
 
 
+def _send_payout(payment: Payment, beneficiary: Beneficiary, *, actor) -> None:
+    rail, method = PAYOUT_METHODS[beneficiary.method]
+    label = payment.note or f"{payment.get_type_display()} to {beneficiary.name}"
+    external = payment_services.hold_payout(
+        Account.objects.get(pk=payment.source_account_id),
+        initiator=actor,
+        rail=rail,
+        method=method,
+        amount=payment.amount,
+        idempotency_key=f"payment-{payment.id}",
+        reference=payment.reference,
+        metadata={
+            **payment.beneficiary_details,
+            "recipient": beneficiary.name,
+            "description": label[:140],
+            "remarks": label[:100],
+            "books_role": books_role(payment),
+        },
+    )
+    payment.status, payment.external_payment = P.PROCESSING, external
+    payment.save(update_fields=["status", "external_payment", "updated_at"])
+
+
+@receiver(payment_settled)
+def on_payout_settled(sender, payment, **kwargs):
+    """A business payment sent by M-Pesa or bank is paid, or failed (its money is already back in the cashbook)."""
+    business_payment = Payment.objects.select_for_update().filter(external_payment=payment).first()
+    if business_payment is None or business_payment.status != P.PROCESSING:
+        return
+    if payment.status == payment.Status.COMPLETED:
+        business_payment.status, business_payment.completed_at = P.COMPLETED, timezone.now()
+    else:
+        business_payment.status = P.FAILED
+        business_payment.failure_reason = f"{payment.get_rail_display()}: {payment.failure_reason}"[:255]
+    business_payment.save(update_fields=["status", "completed_at", "failure_reason", "updated_at"])
+    _record_outcome(business_payment, actor=None)
+
+
 def reverse_payment(*, membership: Membership, payment_id, reason: str) -> Payment:
     """Takes back a payment made in error, while the recipient still holds the money and within the
     platform's reversal window. The money goes back into the cashbook; the payment is kept, marked REVERSED."""
@@ -405,6 +473,11 @@ def reverse_payment(*, membership: Membership, payment_id, reason: str) -> Payme
             raise BusinessError("Payment not found.", "payment_not_found", 404)
         if payment.status != P.COMPLETED:
             raise BusinessError("Only a paid payment can be reversed.", "not_paid")
+        if payment.external_payment_id:
+            raise BusinessError(
+                f"Money sent by M-Pesa or bank can't be taken back here. Ask {payment.recipient_name} to return it.",
+                "not_reversible",
+            )
         days = rules.platform().payroll_reversal_days
         if timezone.now() - payment.completed_at > timedelta(days=days):
             raise BusinessError(

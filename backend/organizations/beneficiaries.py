@@ -39,6 +39,7 @@ PAYMENT_TYPE = {
     Beneficiary.Kind.LANDLORD: Payment.Type.EXPENSE,
     Beneficiary.Kind.SERVICE_PROVIDER: Payment.Type.EXPENSE,
     Beneficiary.Kind.UTILITY: Payment.Type.EXPENSE,
+    Beneficiary.Kind.OWN_ACCOUNT: Payment.Type.WITHDRAWAL,
     Beneficiary.Kind.OTHER: Payment.Type.OTHER,
 }
 

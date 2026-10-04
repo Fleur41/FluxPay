@@ -60,6 +60,8 @@ def resolve_stuck_payments():
         submit_payment_task.delay(str(payment_id))
     for payment_id in stuck.filter(status__in=[Status.PENDING, Status.SUBMITTED]).values_list("id", flat=True)[:BATCH]:
         check_payment_task.delay(str(payment_id))
+    # Payouts are never failed on silence; after a while a person checks them instead.
+    services.flag_silent_payouts(timezone.now() - timedelta(hours=settings.FLUXPAY_PAYOUT_REVIEW_AFTER_HOURS))
 
 
 @shared_task

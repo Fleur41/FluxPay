@@ -1,0 +1,35 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<form method="post" class="flex flex-col gap-4" style="max-width: 640px">
+    {% csrf_token %}
+    <p>
+        {{ payment.get_method_display }} of <strong>{{ payment.currency }} {{ payment.amount }}</strong>
+        from wallet {{ payment.account.account_number }}, reference <strong>{{ payment.reference }}</strong>.
+        The money already left the wallet when the payout was requested.
+    </p>
+    <div class="flex flex-col gap-1">
+        {% for label, value in details %}<div><strong>{{ label }}:</strong> {{ value }}</div>{% endfor %}
+    </div>
+    {% if bank %}
+    <p>Send this transfer from FluxPay's bank, then record it here with the bank's reference. That completes the
+        payout and records the payment in FluxPay's cashbook. If the bank returned it, choose "It was not paid".</p>
+    {% else %}
+    <p>The provider sent no result for this payout. Check its portal first. Only confirm it with the receipt you
+        found there; choose "It was not paid" only if the provider shows it failed, never on silence alone.</p>
+    {% endif %}
+    {% for field in form %}
+    {% if bank or field.name != "bank_account" and field.name != "date" %}
+    <div class="flex flex-col gap-2">
+        <label for="{{ field.id_for_label }}" class="font-semibold">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<p class="text-red-600 text-sm">{{ error }}</p>{% endfor %}
+        {% if field.help_text %}<p class="text-sm" style="color: var(--color-base-500)">{{ field.help_text }}</p>{% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    <div class="flex gap-2">
+        <button type="submit" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-primary-600 text-white"><span class="material-symbols-outlined">task_alt</span> Save</button>
+        <a href="{{ back }}" class="font-medium inline-flex items-center rounded-default px-3 py-2 border border-base-200 dark:border-base-700">Cancel</a>
+    </div>
+</form>
+{% endblock %}

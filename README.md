@@ -227,7 +227,7 @@ A label next to the FluxPay name shows **Development** (yellow) or **Production*
 | **Top-ups today** | Staff top-ups and corrections posted today |
 | **Failed transactions (7 days)** | Held payouts that were returned |
 | **Customer money held** | Total balance and wallet count per currency (FluxPay's own system accounts excluded) |
-| **Needs attention** | Business payments waiting for approval, external payments flagged for review, alerts that failed to send. Each links to the filtered list |
+| **Needs attention** | Business payments waiting for approval, external payments flagged for review, bank payouts waiting to be sent, alerts that failed to send. Each links to the filtered list |
 | **Audit log** | Tamper check: confirms no audit record has been altered or removed |
 | **Recent top-ups & corrections** | The last six, with who posted them |
 
@@ -245,7 +245,7 @@ Staff only see the panels and menu items their permissions allow. The sidebar sh
 | Businesses | **Businesses** | Suspend or reactivate a business; see its members and approval threshold |
 | | **Business payments** | Every payment out of a business cashbook (salaries, allowances, supplier payments...) with its type, status and reference. Approving is done by the business's own approvers in the app, not by staff |
 | | **Invitations** | Pending, accepted and expired invitations |
-| External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review** |
+| External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review**. Filter **Bank payouts to send** for the bank payouts staff send from FluxPay's bank: open one for its payout details, send it, then **Confirm or fail** it with the bank's reference (this also records it in the cashbook). A payout M-Pesa never answered is flagged for review and settled the same way, after checking the M-Pesa portal |
 | | **Provider callbacks** | Raw callbacks received from providers, and what happened to each |
 | Alerts & compliance | **Email & SMS alerts** | Every alert sent, filterable by channel, event and status (use **Failed** to find problems) |
 | | **Audit log** | Who did what and when, across the app and the admin |
@@ -312,7 +312,9 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET | `config/` | public — platform settings the app reads at start-up |
 | GET | `statements/?account_id=&date_from=&date_to=&file_format=pdf\|csv` | statement file, 10/min |
 | GET/PATCH | `notifications/settings/` | SMS and email alert preferences |
-| GET | `payments/` , `payments/{id}/` | external deposits and withdrawals |
+| GET | `payments/` , `payments/{id}/` | your external deposits and withdrawals (personal wallets only), with `receipt` once confirmed |
+| POST | `deposits/mpesa/` | `{account_id, phone_number, amount, idempotency_key}`: STK Push; whole shillings; answers 202, poll `payments/{id}/` |
+| POST | `withdrawals/mpesa/` | `{account_id, amount, idempotency_key}`: to the M-Pesa number on your profile only; the money leaves the wallet at once and comes back if M-Pesa fails it |
 | GET/POST | `organizations/` | your businesses; create one |
 | GET/PATCH | `organizations/{id}/` | one business |
 | GET, PATCH/DELETE | `organizations/{id}/members/` , `…/members/{member_id}/` | members and their roles |
@@ -324,7 +326,9 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | POST | `organizations/{id}/payments/{payment_id}/reverse/` | take back a paid payment, `{reason}`; owners and admins, within the reversal window |
 | GET/POST | `organizations/{id}/beneficiaries/?search=&kind=&active=all` | saved suppliers, contractors, landlords... POST `{name, kind, method, …details}`; `method` is `FLUXPAY` (`account_number`), `MPESA_MOBILE` (`mpesa_phone`), `MPESA_PAYBILL` (`paybill_number`, `paybill_account`), `MPESA_TILL` (`till_number`) or `BANK` (`bank_name`, `bank_account_name`, `bank_account_number`, optional `bank_branch`, `bank_swift_code`). Viewers see account numbers masked |
 | GET/PATCH/DELETE | `organizations/{id}/beneficiaries/{beneficiary_id}/` | one beneficiary; changing payout details unverifies it; DELETE archives |
-| POST | `organizations/{id}/beneficiaries/{beneficiary_id}/verify/` | an owner or admin confirms the payout details; not the person who entered them, unless they are the only approver. Only verified beneficiaries can be paid: POST `payments/` with `{beneficiary_id, amount, idempotency_key}` (`type` defaults from the kind). For now only `FLUXPAY` beneficiaries can be paid |
+| POST | `organizations/{id}/beneficiaries/{beneficiary_id}/verify/` | an owner or admin confirms the payout details; not the person who entered them, unless they are the only approver. Only verified beneficiaries can be paid: POST `payments/` with `{beneficiary_id, amount, idempotency_key}` (`type` defaults from the kind). M-Pesa and bank beneficiaries are paid out of the cashbook at once; the payment stays `PROCESSING` until M-Pesa or FluxPay staff confirm it (`payout_method`, `payout_receipt`), or `FAILED` with the money back. A `OWN_ACCOUNT` beneficiary takes `WITHDRAWAL`s (owners only, filed as drawings) |
+| POST | `organizations/{id}/deposits/mpesa/` | `{phone_number, amount, idempotency_key}`: STK Push into the business cashbook (filed as owner's capital; re-file it in the books if it was a sale) |
+| GET | `organizations/{id}/external-payments/` , `…/external-payments/{payment_id}/` | the cashbook's M-Pesa and bank deposits and payouts |
 | GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
 | POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
 | POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |
