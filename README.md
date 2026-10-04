@@ -18,13 +18,17 @@ FluxPay/
 | **Dashboard** | Total balance in your preferred currency, wallets, recent activity, pull to refresh, hide-balances toggle |
 | **Transfer** | Validate → confirm recipient name with the server → review → **BiometricPrompt** → send. Idempotency keys make retries safe |
 | **Transactions** | Full history grouped by day, search and money-in/out filters (run in SQL, so they work offline), detail screen with share receipt |
+| **Statements** | PDF or CSV account statements for a date range, shared from the app |
+| **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
+| **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
+| **Business accounts** | Organizations with members, invitations, shared wallets, payment requests that need approval, and an audit log (API) |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
 | **Security** | Encrypted tokens (Android Keystore AES-GCM), 5-minute inactivity timeout, FLAG_SECURE, no backups, HTTPS-only outside dev, R8 |
 
 ## Android architecture
 
 ```
-:app ──────────────► :feature:auth  :feature:dashboard  :feature:transfer  :feature:transactions  :feature:settings
+:app ──────────────► :feature:auth  :feature:dashboard  :feature:transfer  :feature:transactions  :feature:budget  :feature:settings
  │                        │  (presentation + feature use cases; depend only on :core:domain / :core:ui)
  │                        ▼
  ├────────────────► :core:ui ──► :core:domain ──► :core:common
@@ -76,8 +80,8 @@ adb shell am start -a android.intent.action.VIEW -d "fluxpay://transaction/<tran
 ```bash
 cd backend
 cp .env.example .env
-docker compose up --build          # API on http://localhost:8000, Postgres on :5432
-docker compose exec api python manage.py seed_demo
+docker compose up --build          # API on http://localhost:8000, Postgres on :5432, plus Redis and the worker
+docker compose exec api python manage.py createsuperuser   # for Django admin at /admin/
 ```
 
 Or without Docker (uses SQLite unless `DATABASE_URL` is set):
@@ -87,12 +91,12 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py seed_demo         # prints two demo logins and their account numbers
+python manage.py createsuperuser
 python manage.py runserver 0.0.0.0:8000
-python manage.py test              # 17 API tests
+python manage.py test
 ```
 
-Demo users: `amina@fluxpay.dev` and `brian@fluxpay.dev`, password `FluxPay#2026`. New sign-ups get a demo balance of 10,000 in debug (`FLUXPAY_SIGNUP_BONUS`, set to 0 in production).
+Business rules are data, not code: staff set the currencies (with each one's per-transaction minimum and maximum and an optional signup bonus), the default currency, statement range, invitation expiry, the app's inactivity timeout and the budget guideline in Django admin under **Platform settings**. Every change is audited, and the app reads them from `GET /api/v1/config/`. New wallets start at 0; a signup bonus, when staff set one, is paid from a system Promotions account so the ledger always balances.
 
 ### 2. Android
 
@@ -113,6 +117,80 @@ cd android
 | prodRelease | `com.fluxpay.app` | `https://api.fluxpay.app/` | R8 minified, no logging |
 
 Override any host with `-Pfluxpay.devUrl=…`, `-Pfluxpay.stagingUrl=…` or `-Pfluxpay.prodUrl=…`.
+
+## Connecting the Android app to the backend
+
+The app finds the API through one value, `BuildConfig.BASE_URL`, which the build flavor sets. Nothing else in the code holds a host name.
+
+```
+android/app/build.gradle.kts        BASE_URL per flavor (or -Pfluxpay.<flavor>Url=…)
+        │
+app/di/AppModule.kt                 AppConfig(baseUrl = BuildConfig.BASE_URL)
+        │
+core/network/di/NetworkModule.kt    Retrofit.baseUrl(config.baseUrl) + OkHttp (15 s connect, 30 s read)
+        │   AuthInterceptor          adds "Authorization: Bearer <access>"
+        │   TokenAuthenticator       on 401, calls auth/refresh/ once and retries
+        ▼
+core/network/api/FluxPayApi.kt      @GET("api/v1/accounts/") … → Django REST API
+```
+
+The repositories in `:core:data` call `FluxPayApi`, save the results to Room, and the screens show what's in Room. So once the base URL points at a running backend, every screen is connected.
+
+### Check the backend is reachable first
+
+```bash
+curl http://localhost:8000/health/          # {"status": "ok"}
+curl http://localhost:8000/api/v1/config/   # public: currencies, limits, timeouts the app needs at start-up
+```
+
+### Emulator (default)
+
+Start the backend on all interfaces (`docker compose up`, or `python manage.py runserver 0.0.0.0:8000`) and run **devDebug**. The emulator reaches your computer at `10.0.2.2`, which is the dev default, so no changes are needed.
+
+### Physical phone over USB
+
+Forward the phone's port 8000 to your computer, then build with the loopback address:
+
+```bash
+adb reverse tcp:8000 tcp:8000
+cd android && ./gradlew installDevDebug -Pfluxpay.devUrl=http://127.0.0.1:8000/
+```
+
+Use `adb reverse` rather than your computer's Wi-Fi IP: the dev network security config (`app/src/dev/res/xml/network_security_config.xml`) allows plain HTTP only to `10.0.2.2`, `localhost` and `127.0.0.1`, so a LAN address like `http://192.168.1.20:8000/` is blocked.
+
+### Phone without a cable, or sharing with testers
+
+Put the local API behind an HTTPS tunnel and point the app at it:
+
+```bash
+cloudflared tunnel --url http://localhost:8000           # prints https://<random>.trycloudflare.com
+# backend/.env:  DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,10.0.2.2,<random>.trycloudflare.com
+./gradlew installDevDebug -Pfluxpay.devUrl=https://<random>.trycloudflare.com/
+```
+
+### Staging and production
+
+`staging` and `prod` builds talk HTTPS only, to `https://staging-api.fluxpay.app/` and `https://api.fluxpay.app/`. Point them elsewhere with `-Pfluxpay.stagingUrl=…` or `-Pfluxpay.prodUrl=…`. On the server, run the `ghcr.io/fleur41/fluxpay-api` image behind a TLS proxy that sets `X-Forwarded-Proto` (Django trusts it when `DJANGO_DEBUG=false`), and set:
+
+| Variable | Value |
+|---|---|
+| `DJANGO_DEBUG` | `false` |
+| `DJANGO_SECRET_KEY` | long random string |
+| `DJANGO_ALLOWED_HOSTS` | the API's host name, e.g. `api.fluxpay.app` |
+| `DATABASE_URL` | the PostgreSQL connection string |
+| `CELERY_BROKER_URL` | Redis, for background jobs (also run a worker and one `celery beat`) |
+
+`CORS_ALLOWED_ORIGINS` is only for browser clients; the Android app doesn't need it.
+
+### When it doesn't connect
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `CLEARTEXT communication … not permitted` | HTTP to a host the dev config doesn't allow, or HTTP in a staging/prod build | Use `adb reverse` with `127.0.0.1`, or an HTTPS URL |
+| `400 Bad Request` from Django | The host isn't in `DJANGO_ALLOWED_HOSTS` | Add it to `backend/.env` and restart |
+| `failed to connect to /10.0.2.2` | Backend not running, or bound to `127.0.0.1` only | Run `runserver 0.0.0.0:8000`, or use Docker |
+
+Turn on HTTP logging (on in `dev` and `staging`) and filter Logcat by `okhttp.OkHttpClient` to see each request and response; the `Authorization` header is redacted.
 
 ### Release signing
 
@@ -140,6 +218,20 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET | `transactions/?type=&category=&account=&search=&date_from=&date_to=&page=` | paginated, newest first |
 | GET | `transactions/{id}/` | one transaction |
 | POST | `transfers/` | `{source_account_id, destination_account_number, amount, note, idempotency_key}` |
+| GET | `config/` | public — platform settings the app reads at start-up |
+| GET | `statements/?account_id=&date_from=&date_to=&file_format=pdf\|csv` | statement file, 10/min |
+| GET/PATCH | `notifications/settings/` | SMS and email alert preferences |
+| GET | `payments/` , `payments/{id}/` | external deposits and withdrawals |
+| GET/POST | `organizations/` | your businesses; create one |
+| GET/PATCH | `organizations/{id}/` | one business |
+| GET, PATCH/DELETE | `organizations/{id}/members/` , `…/members/{member_id}/` | members and their roles |
+| GET/POST, DELETE | `organizations/{id}/invitations/` , `…/invitations/{invitation_id}/` | invite by email; revoke |
+| POST | `invitations/accept/` | join a business with an invitation token |
+| GET | `organizations/{id}/accounts/` , `…/transactions/` , `…/statements/` , `…/audit-events/` | business wallets, history, statements and audit log |
+| GET/POST | `organizations/{id}/payment-requests/` | payment requests |
+| POST | `organizations/{id}/payment-requests/{request_id}/{approve\|reject\|cancel}/` | decide on a payment request |
+
+Outside `/api/v1/`: `GET /health/` (public) and `POST /hooks/<rail>/<token>/` (payment provider callbacks).
 
 Transfers run in one database transaction with row locks taken in a fixed order (no deadlocks), a non-negative balance constraint, a per-user idempotency key, a per-transfer limit and a 20/min throttle. Every transfer writes a DEBIT and a CREDIT ledger line sharing one reference.
 
