@@ -21,7 +21,7 @@ FluxPay/
 | **Statements** | PDF or CSV account statements for a date range, shared from the app |
 | **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
 | **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
-| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, typed payments to workers and saved beneficiaries (suppliers, contractors...) with verification, approval and reversal, payroll, and an audit log (API) |
+| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, workers who join by invitation or approved join code (invited, waiting for approval, active, suspended, deactivated), typed payments to workers and saved beneficiaries (suppliers, contractors...) with verification, approval and reversal, payroll, and an audit log (API) |
 | **Receive** | Share your name and account number from the dashboard so people can pay you |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
 | **Admin dashboard** | Staff back-office at `/admin/`: KPIs, customer balances, wallet top-ups and corrections, business oversight, alerts, audit log and platform rules ([guide](#admin-dashboard)) |
@@ -329,10 +329,17 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | POST | `organizations/{id}/beneficiaries/{beneficiary_id}/verify/` | an owner or admin confirms the payout details; not the person who entered them, unless they are the only approver. Only verified beneficiaries can be paid: POST `payments/` with `{beneficiary_id, amount, idempotency_key}` (`type` defaults from the kind). M-Pesa and bank beneficiaries are paid out of the cashbook at once; the payment stays `PROCESSING` until M-Pesa or FluxPay staff confirm it (`payout_method`, `payout_receipt`), or `FAILED` with the money back. A `OWN_ACCOUNT` beneficiary takes `WITHDRAWAL`s (owners only, filed as drawings) |
 | POST | `organizations/{id}/deposits/mpesa/` | `{phone_number, amount, idempotency_key}`: STK Push into the business cashbook (filed as owner's capital; re-file it in the books if it was a sale) |
 | GET | `organizations/{id}/external-payments/` , `…/external-payments/{payment_id}/` | the cashbook's M-Pesa and bank deposits and payouts |
+| GET/POST | `organizations/{id}/workers/?status=&search=&active=all` | the worker register (active workers unless `status` is given: `INVITED`, `PENDING_ACTIVATION`, `SUSPENDED`, `DEACTIVATED`). POST invites someone: `{phone_number, full_name, email?, salary, job_title?, employee_number?}` or `{account_number, salary, …}`; they get a code by SMS/email and become `ACTIVE` only when they accept. `workers/import/` invites many (JSON rows or CSV) |
+| GET/PATCH/DELETE | `organizations/{id}/workers/{worker_id}/` | one worker; PATCH pay details; DELETE removes them (or cancels the invitation/request), keeping their pay history |
+| POST | `organizations/{id}/workers/{worker_id}/{approve\|decline\|suspend\|reactivate\|resend-invitation}/` | approve a join request `{salary, job_title?, employee_number?}` (owners, admins); decline or suspend `{reason}`; suspended workers can't be paid |
+| GET/POST/DELETE | `organizations/{id}/worker-join-code/` | the business's join code and its QR link (owners, admins). POST makes a new one (the old stops working), DELETE switches it off |
 | GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
 | POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
 | POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |
 | GET | `payslips/` | a worker's own pay from every business: pay-run lines and one-off salaries, bonuses... (`status` is `PAID` or `REVERSED`) |
+| POST | `worker-invitations/preview/` , `worker-invitations/accept/` | `{code}` from the invitation SMS/email (any case, dash optional): who it's from; accept it to be paid by that business into your own wallet. 30 codes an hour |
+| GET/POST | `employers/` , `employers/join/` | the businesses you work for or asked to join; `{code}` asks to join with a business's join code (typed or scanned), and the business approves |
+| POST | `employers/{worker_id}/leave/` | stop working for a business; your FluxPay account and pay history stay |
 
 Outside `/api/v1/`: `GET /health/` (public) and `POST /hooks/<rail>/<token>/` (payment provider callbacks).
 

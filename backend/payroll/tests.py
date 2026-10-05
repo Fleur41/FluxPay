@@ -19,6 +19,7 @@ from organizations import services as orgs
 from organizations.models import Membership, Payment
 from platform_settings.models import PlatformSettings
 
+from . import workers as register
 from .models import PayRun, Worker
 
 User = get_user_model()
@@ -27,8 +28,8 @@ D = Decimal
 
 
 @funded
-class PayrollTests(APITestCase):
-    """Most tests use the API, the way the app does."""
+class PayrollTestCase(APITestCase):
+    """A business (Kamau Traders) with 50,000 in its cashbook, and five FluxPay users who can become its workers."""
 
     def setUp(self):
         self.owner = User.objects.create_user("owner@kamau.test", PASSWORD, full_name="Grace Kamau")
@@ -61,9 +62,15 @@ class PayrollTests(APITestCase):
         return f"/api/v1/organizations/{self.org.id}/{path}"
 
     def add_workers(self, salary="10000"):
+        """Invites each worker by their FluxPay account, and each accepts in their own app."""
+        membership = Membership.objects.select_related("organization", "user").get(organization=self.org, user=self.owner)
         for wallet in self.workers:
-            res = self.client.post(self.url("workers/"), {"account_number": wallet.account_number, "salary": salary})
-            self.assertEqual(res.status_code, 201, res.data)
+            _worker, code = register.invite(membership=membership, account_number=wallet.account_number,
+                                            salary_amount=salary)  # fmt: skip
+            self.client.force_authenticate(wallet.owner)
+            res = self.client.post("/api/v1/worker-invitations/accept/", {"code": code})
+            self.assertEqual(res.status_code, 200, res.data)
+        self.client.force_authenticate(self.owner)
 
     def create_run(self, title="October salaries"):
         res = self.client.post(self.url("pay-runs/"), {"title": title, "pay_date": business_date().isoformat()})
@@ -74,12 +81,20 @@ class PayrollTests(APITestCase):
         wallet.refresh_from_db()
         return wallet.balance
 
+
+class PayrollTests(PayrollTestCase):
+    """Most tests use the API, the way the app does."""
+
     # Workers
 
-    def test_add_workers_by_account_or_phone_and_import_many(self):
-        res = self.client.post(self.url("workers/"), {"phone_number": "0711000000", "salary": "12,500"})
+    def test_invite_workers_by_account_or_phone_and_import_many(self):
+        res = self.client.post(self.url("workers/"), {"full_name": "Wanjiru", "phone_number": "0711000000",
+                                                      "salary": "12,500"})  # fmt: skip
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertEqual((res.data["name"], res.data["salary"]), ("Worker 0", "12500.00"))
+        self.assertEqual(
+            (res.data["name"], res.data["salary"], res.data["status"], res.data["account_number"], res.data["currency"]),
+            ("Wanjiru", "12500.00", "INVITED", "", "KES"),
+        )
         res = self.client.post(
             self.url("workers/import/"),
             {"rows": [
@@ -92,7 +107,8 @@ class PayrollTests(APITestCase):
         )  # fmt: skip
         self.assertEqual((res.data["created"], len(res.data["errors"])), (2, 2))
         self.assertEqual([e["row"] for e in res.data["errors"]], [3, 4])
-        self.assertEqual(self.client.get(self.url("workers/")).data["count"], 3)
+        self.assertEqual(self.client.get(self.url("workers/")).data["count"], 0)  # nobody has accepted yet
+        self.assertEqual(self.client.get(self.url("workers/"), {"status": "INVITED"}).data["count"], 3)
 
     def test_csv_import(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -105,10 +121,10 @@ class PayrollTests(APITestCase):
         )
         self.assertEqual(res.data, {"created": 5, "updated": 0, "errors": []})
 
-    def test_workers_must_have_a_fluxpay_wallet_and_viewers_cannot_add(self):
+    def test_unknown_accounts_and_viewers_cannot_add(self):
         res = self.client.post(self.url("workers/"), {"account_number": "1234567890", "salary": "100"})
         self.assertEqual(res.status_code, 404)
-        self.assertIn("sign up for FluxPay", res.data["error"]["message"])
+        self.assertIn("No FluxPay personal account", res.data["error"]["message"])
         viewer = self.member("viewer@kamau.test", "Vic Viewer", Membership.Role.VIEWER)
         self.client.force_authenticate(viewer)
         res = self.client.post(self.url("workers/"), {"account_number": self.workers[0].account_number, "salary": "1"})
@@ -289,7 +305,8 @@ class PayrollTests(APITestCase):
         })  # fmt: skip
         self.assertEqual(res.data["error"]["code"], "worker_not_allowed")
         other = orgs.create_organization(user=self.finance, name="Other Co")
-        theirs = Worker.objects.create(organization=other, wallet=self.workers[1], salary=D("1"), added_by=self.finance)
+        theirs = Worker.objects.create(organization=other, wallet=self.workers[1], user=self.workers[1].owner,
+                                       full_name="Worker 1", status="ACTIVE", salary=D("1"), added_by=self.finance)  # fmt: skip
         res = self.client.post(self.url("payments/"), {
             "type": "BONUS", "worker_id": str(theirs.id), "amount": "100", "idempotency_key": "other-worker",
         })  # fmt: skip
@@ -392,7 +409,11 @@ class ScaleTests(APITestCase):
             User(email=f"w{i}@big.test", full_name=f"Worker {i:03d}") for i in range(200)
         )
         wallets = Account.objects.bulk_create(Account(owner=u, currency="KES") for u in users)
-        Worker.objects.bulk_create(Worker(organization=org, wallet=w, salary=D("15000"), added_by=owner) for w in wallets)
+        Worker.objects.bulk_create(
+            Worker(organization=org, wallet=w, user=w.owner, full_name=w.owner.full_name, status="ACTIVE",
+                   salary=D("15000"), added_by=owner)
+            for w in wallets
+        )  # fmt: skip
         from . import services
 
         run = services.create_pay_run(membership=membership, title="Big payroll", pay_date=business_date())

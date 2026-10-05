@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.CallReceived
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
@@ -35,6 +36,9 @@ import com.fluxpay.core.ui.components.FullScreenLoading
 import com.fluxpay.core.ui.components.SectionTitle
 import com.fluxpay.feature.dashboard.presentation.components.AccountsRow
 import com.fluxpay.feature.dashboard.presentation.components.BudgetPlannerCard
+import com.fluxpay.feature.dashboard.presentation.components.BusinessCashbookCard
+import com.fluxpay.feature.dashboard.presentation.components.JoinEmployerCard
+import com.fluxpay.feature.dashboard.presentation.components.MyPayRow
 import com.fluxpay.feature.dashboard.presentation.components.QuickAction
 import com.fluxpay.feature.dashboard.presentation.components.QuickActionsRow
 import com.fluxpay.feature.dashboard.presentation.components.ReceiveSheet
@@ -48,6 +52,8 @@ fun DashboardScreen(
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
     onOpenBudget: () -> Unit,
+    onOpenBusiness: (String) -> Unit,
+    onJoinEmployer: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -95,7 +101,8 @@ fun DashboardScreen(
             summary.totalCurrency?.let { totalCurrency ->
                 item(key = "balance") {
                     BalanceCard(
-                        title = "Total balance",
+                        // Next to their business accounts, make clear this one is their own money.
+                        title = if (summary.businesses.isEmpty()) "Total balance" else "Personal balance",
                         amount = summary.totalBalance,
                         currency = totalCurrency,
                         hidden = summary.hideBalances,
@@ -110,11 +117,33 @@ fun DashboardScreen(
                     )
                 }
             }
+            if (summary.businesses.isNotEmpty()) {
+                item(key = "businesses-title") {
+                    SectionTitle(
+                        if (summary.businesses.size == 1) "Business account" else "Business accounts",
+                        Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                    )
+                }
+                items(summary.businesses, key = { "business-${it.business.id}" }) { item ->
+                    BusinessCashbookCard(
+                        item = item,
+                        hideBalances = summary.hideBalances,
+                        onClick = { onOpenBusiness(item.business.id) },
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                }
+            }
             item(key = "actions") {
                 QuickActionsRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { weight ->
                     QuickAction(Icons.AutoMirrored.Outlined.Send, "Send", onSendMoney, weight)
                     QuickAction(Icons.AutoMirrored.Outlined.CallReceived, "Receive", { showReceive = true }, weight)
                     QuickAction(Icons.Outlined.History, "History", onSeeAllTransactions, weight)
+                }
+            }
+            // Nobody pays them yet and they run no business: offer the way to join their employer.
+            if (summary.businesses.isEmpty() && summary.recentPay.isEmpty()) {
+                item(key = "join-employer") {
+                    JoinEmployerCard(onClick = onJoinEmployer, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 }
             }
             item(key = "budget") {
@@ -129,6 +158,14 @@ fun DashboardScreen(
                             hideBalances = summary.hideBalances,
                             modifier = Modifier.padding(start = 20.dp),
                         )
+                    }
+                }
+            }
+            if (summary.recentPay.isNotEmpty()) {
+                item(key = "pay") {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        SectionTitle("My pay")
+                        summary.recentPay.forEach { MyPayRow(it, summary.hideBalances) }
                     }
                 }
             }

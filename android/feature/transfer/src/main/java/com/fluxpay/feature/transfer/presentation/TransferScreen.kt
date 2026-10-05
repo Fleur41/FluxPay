@@ -69,6 +69,7 @@ fun TransferScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val step = state.step
+    val scrollState = rememberScrollState()
 
     BackHandler(enabled = step is TransferStep.Review) { viewModel.onEdit() }
 
@@ -114,7 +115,7 @@ fun TransferScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

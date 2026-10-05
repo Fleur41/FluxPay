@@ -8,8 +8,13 @@ import com.fluxpay.core.domain.model.BookCategory
 import com.fluxpay.core.domain.model.BookEntry
 import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.Business
+import com.fluxpay.core.domain.model.BusinessBalance
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
+import com.fluxpay.core.domain.model.WorkerStatus
+import com.fluxpay.core.domain.model.JoinCode
+import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.Employer
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.PayRun
 import com.fluxpay.core.domain.model.PayRunStatus
@@ -23,6 +28,10 @@ import com.fluxpay.core.network.ApiCaller
 import com.fluxpay.core.network.api.FluxPayApi
 import com.fluxpay.core.network.dto.AmountDto
 import com.fluxpay.core.network.dto.CategoryDto
+import com.fluxpay.core.network.dto.WorkerActionDto
+import com.fluxpay.core.network.dto.JoinCodeDto
+import com.fluxpay.core.network.dto.EmployerDto
+import com.fluxpay.core.network.dto.CodeDto
 import com.fluxpay.core.network.dto.NoteDto
 import com.fluxpay.core.network.dto.PayRunCreateDto
 import com.fluxpay.core.network.dto.PayRunDto
@@ -36,6 +45,12 @@ import com.fluxpay.core.network.dto.WorkerPatchDto
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -46,6 +61,33 @@ class BusinessRepositoryImpl @Inject constructor(
 ) : BusinessRepository {
 
     private suspend fun <T> call(block: suspend () -> T): NetworkResult<T> = withContext(io) { apiCaller(block) }
+
+    // In memory only: refreshed at sign-in and on Home, forgotten at sign-out.
+    private val myBusinesses = MutableStateFlow<List<BusinessBalance>?>(null)
+    private val myPay = MutableStateFlow<List<MyPayslip>>(emptyList())
+
+    override fun observeMyBusinesses(): Flow<List<BusinessBalance>?> = myBusinesses.asStateFlow()
+
+    override fun observeMyPay(): Flow<List<MyPayslip>> = myPay.asStateFlow()
+
+    override suspend fun refreshMine(): NetworkResult<Unit> = coroutineScope {
+        val pay = async { myPayslips() }
+        val businesses = businesses()
+        if (businesses is NetworkResult.Success) {
+            // A cashbook that fails to load still lists its business (without a balance) rather than hiding it.
+            myBusinesses.value = businesses.data
+                .map { business -> async { BusinessBalance(business, (wallet(business.id) as? NetworkResult.Success)?.data) } }
+                .awaitAll()
+        }
+        val payResult = pay.await()
+        if (payResult is NetworkResult.Success) myPay.value = payResult.data
+        listOf(businesses, payResult).filterIsInstance<NetworkResult.Error>().firstOrNull() ?: NetworkResult.Success(Unit)
+    }
+
+    override fun clearMine() {
+        myBusinesses.value = null
+        myPay.value = emptyList()
+    }
 
     override suspend fun businesses() = call { api.organizations() }.map { list ->
         list.map { Business(it.id, it.name, it.role.orEmpty(), it.status == "ACTIVE") }
@@ -67,20 +109,66 @@ class BusinessRepositoryImpl @Inject constructor(
         all
     }.map { list -> list.map { it.toDomain() } }
 
-    override suspend fun addWorker(businessId: String, accountOrPhone: String, salary: String, jobTitle: String) = call {
-        val digits = accountOrPhone.filter { it.isDigit() || it == '+' }
+    override suspend fun inviteWorker(
+        businessId: String,
+        fullName: String,
+        phoneOrAccount: String,
+        email: String,
+        salary: String,
+        jobTitle: String,
+    ) = call {
+        val digits = phoneOrAccount.filter { it.isDigit() || it == '+' }
         // FluxPay account numbers are 10 digits and never start with 0; phone numbers do (07..., +254...).
         val isAccount = digits.length == 10 && !digits.startsWith("0")
         api.addWorker(
             businessId,
             WorkerCreateDto(
+                fullName = fullName.trim(),
+                email = email.trim(),
                 accountNumber = if (isAccount) digits else "",
-                phoneNumber = if (isAccount) "" else accountOrPhone.trim(),
+                phoneNumber = if (isAccount) "" else phoneOrAccount.trim(),
                 salary = salary,
                 jobTitle = jobTitle,
             ),
         )
     }.map { it.toDomain() }
+
+    override suspend fun allWorkers(businessId: String) = call {
+        val all = mutableListOf<WorkerDto>()
+        var page = 1
+        do {
+            val result = api.workers(businessId, page, active = "all")
+            all += result.results
+            page++
+        } while (result.next != null)
+        all.filter { it.status != "DEACTIVATED" } // people who left are history, not the register
+    }.map { list -> list.map { it.toDomain() } }
+
+    override suspend fun workerAction(
+        businessId: String,
+        workerId: String,
+        action: String,
+        salary: String?,
+        jobTitle: String?,
+        reason: String?,
+    ) = call { api.workerAction(businessId, workerId, action, WorkerActionDto(salary, jobTitle, reason)) }.map { it.toDomain() }
+
+    override suspend fun joinCode(businessId: String) = call { api.joinCode(businessId) }.map { it.toDomain() }
+
+    override suspend fun setJoinCode(businessId: String, enabled: Boolean) = call {
+        if (enabled) api.newJoinCode(businessId) else api.disableJoinCode(businessId)
+    }.map { it.toDomain() }
+
+    override suspend fun previewInvitation(code: String) =
+        call { api.previewInvitation(CodeDto(code)) }.map { InvitationPreview(it.business, it.name, it.jobTitle) }
+
+    override suspend fun acceptInvitation(code: String) = call { api.acceptInvitation(CodeDto(code)) }.map { it.toDomain() }
+
+    override suspend fun requestToJoin(code: String) = call { api.requestToJoin(CodeDto(code)) }.map { it.toDomain() }
+
+    override suspend fun myEmployers() = call { api.myEmployers() }.map { list -> list.map { it.toDomain() } }
+
+    override suspend fun leaveEmployer(employerId: String) = call { api.leaveEmployer(employerId) }.map { it.toDomain() }
 
     override suspend fun updateSalary(businessId: String, workerId: String, salary: String) =
         call { api.updateWorker(businessId, workerId, WorkerPatchDto(salary = salary)) }.map { it.toDomain() }
@@ -153,7 +241,16 @@ class BusinessRepositoryImpl @Inject constructor(
     override suspend fun reclassify(businessId: String, entryId: String, categoryId: Int) =
         call { api.reclassify(businessId, entryId, ReclassifyDto(categoryId)) }.map { }
 
-    private fun WorkerDto.toDomain() = Worker(id, name, accountNumber, currency, employeeNumber, jobTitle, salary)
+    private fun WorkerDto.toDomain() = Worker(
+        id, name, accountNumber, currency, employeeNumber, jobTitle, salary, status.toWorkerStatus(), statusLabel,
+        statusNote, phoneNumber,
+    )
+
+    private fun EmployerDto.toDomain() = Employer(id, business, jobTitle, status.toWorkerStatus(), statusLabel)
+
+    private fun JoinCodeDto.toDomain() = JoinCode(enabled, code, link)
+
+    private fun String.toWorkerStatus() = WorkerStatus.entries.firstOrNull { it.name == this } ?: WorkerStatus.UNKNOWN
 
     private fun CategoryDto.toDomain() = BookCategory(id, code, name, type)
 

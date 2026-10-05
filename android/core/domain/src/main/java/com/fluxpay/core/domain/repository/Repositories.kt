@@ -6,9 +6,13 @@ import com.fluxpay.core.domain.model.BookCategory
 import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.BudgetLine
 import com.fluxpay.core.domain.model.Business
+import com.fluxpay.core.domain.model.BusinessBalance
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
 import com.fluxpay.core.domain.model.DownloadedStatement
+import com.fluxpay.core.domain.model.Employer
+import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.JoinCode
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.NotificationSettings
 import com.fluxpay.core.domain.model.PayRun
@@ -129,18 +133,70 @@ interface ConfigRepository {
 
 /** Businesses the user belongs to: workers, payroll and the business's own books. Network only. */
 interface BusinessRepository {
+    /**
+     * The businesses the user is a member of (owner, admin, finance or viewer), with their cashbook balances,
+     * as last refreshed; null until first loaded. Workers aren't members, so for them it's empty.
+     */
+    fun observeMyBusinesses(): Flow<List<BusinessBalance>?>
+
+    /** The user's own pay as a worker, as last refreshed. */
+    fun observeMyPay(): Flow<List<MyPayslip>>
+
+    /** Reloads both. */
+    suspend fun refreshMine(): NetworkResult<Unit>
+
+    /** Forgets both, at sign-out. */
+    fun clearMine()
+
     suspend fun businesses(): NetworkResult<List<Business>>
 
     suspend fun wallet(businessId: String): NetworkResult<BusinessWallet>
 
     suspend fun workers(businessId: String, search: String? = null): NetworkResult<List<Worker>>
 
-    suspend fun addWorker(
+    /**
+     * Invites someone to be paid by the business, by phone number (with their name and optionally an email) or by
+     * their FluxPay account number. They get a code by SMS/email and join only when they accept it.
+     */
+    suspend fun inviteWorker(
         businessId: String,
-        accountOrPhone: String,
+        fullName: String,
+        phoneOrAccount: String,
+        email: String,
         salary: String,
         jobTitle: String,
     ): NetworkResult<Worker>
+
+    /** Every worker that isn't deactivated: active, invited, asking to join, suspended. */
+    suspend fun allWorkers(businessId: String): NetworkResult<List<Worker>>
+
+    /** approve (with salary, job title), decline / suspend (with reason), reactivate, resend-invitation. */
+    suspend fun workerAction(
+        businessId: String,
+        workerId: String,
+        action: String,
+        salary: String? = null,
+        jobTitle: String? = null,
+        reason: String? = null,
+    ): NetworkResult<Worker>
+
+    suspend fun joinCode(businessId: String): NetworkResult<JoinCode>
+
+    /** enabled = true: a new code (the old one stops working); false: joining by code is switched off. */
+    suspend fun setJoinCode(businessId: String, enabled: Boolean): NetworkResult<JoinCode>
+
+    // --- As a worker ---
+
+    suspend fun previewInvitation(code: String): NetworkResult<InvitationPreview>
+
+    suspend fun acceptInvitation(code: String): NetworkResult<Employer>
+
+    /** Asks to join a business with its join code; an owner or admin approves. */
+    suspend fun requestToJoin(code: String): NetworkResult<Employer>
+
+    suspend fun myEmployers(): NetworkResult<List<Employer>>
+
+    suspend fun leaveEmployer(employerId: String): NetworkResult<Employer>
 
     suspend fun updateSalary(businessId: String, workerId: String, salary: String): NetworkResult<Worker>
 

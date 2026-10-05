@@ -89,8 +89,9 @@ fun TransactionDetailScreen(
 
 @Composable
 private fun TransactionDetailContent(transaction: Transaction, hideAmounts: Boolean, modifier: Modifier) {
+    val scrollState = rememberScrollState()
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(scrollState).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

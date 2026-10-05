@@ -53,7 +53,7 @@ class OrganizationAdmin(ModelAdmin):
 
     @display(description="Workers")
     def workers(self, organization):
-        return organization.workers.filter(is_active=True).count()
+        return organization.workers.filter(status="ACTIVE").count()
 
     @display(description="")
     def books(self, organization):

@@ -2,11 +2,13 @@
 
 from datetime import date as Date
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils.dateparse import parse_date
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounting import business as books
@@ -21,11 +23,14 @@ from organizations.serializers import DecisionSerializer
 from organizations.views import OrgScopedMixin
 
 from . import services
+from . import workers as register
 from .models import PayRun, Worker
 from .serializers import (
     BookEntrySerializer,
     CategoryCreateSerializer,
     CategorySerializer,
+    CodeSerializer,
+    EmployerSerializer,
     MyPayslipSerializer,
     PayRunCreateSerializer,
     PayRunDetailSerializer,
@@ -35,6 +40,7 @@ from .serializers import (
     PayslipUpdateSerializer,
     ReclassifySerializer,
     ReverseSerializer,
+    WorkerActionSerializer,
     WorkerCreateSerializer,
     WorkerImportSerializer,
     WorkerSerializer,
@@ -52,17 +58,30 @@ class WritesNeedPayments(OrgScopedMixin):
 # --- Workers ------------------------------------------------------------------------------------
 
 
-class WorkerListCreateView(WritesNeedPayments, generics.ListAPIView):
+class WorkersNeedManage(OrgScopedMixin):
+    def perm_for(self, request):
+        return Perm.VIEW if request.method == "GET" else Perm.MANAGE_WORKERS
+
+
+class WorkerListCreateView(WorkersNeedManage, generics.ListAPIView):
+    """GET: active workers by default; ?status=INVITED|PENDING_ACTIVATION|SUSPENDED|DEACTIVATED, or ?active=all.
+    POST: invites a worker (they join once they accept)."""
+
     serializer_class = WorkerSerializer
 
     def get_queryset(self):
         workers = Worker.objects.select_related("wallet__owner").filter(organization_id=self.membership.organization_id)
-        if self.request.query_params.get("active", "true") != "all":
-            workers = workers.filter(is_active=True)
-        if search := self.request.query_params.get("search", "").strip():
+        params = self.request.query_params
+        if params.get("status"):
+            workers = workers.filter(status=params["status"])
+        elif params.get("active", "true") != "all":
+            workers = workers.filter(status=Worker.Status.ACTIVE)
+        if search := params.get("search", "").strip():
             workers = workers.filter(
-                Q(wallet__owner__full_name__icontains=search)
+                Q(full_name__icontains=search)
+                | Q(wallet__owner__full_name__icontains=search)
                 | Q(wallet__account_number__startswith=search)
+                | Q(phone_number__contains=search)
                 | Q(employee_number__iexact=search)
                 | Q(job_title__icontains=search)
             )
@@ -71,30 +90,157 @@ class WorkerListCreateView(WritesNeedPayments, generics.ListAPIView):
     def post(self, request, org_id):
         serializer = WorkerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        worker, _created = services.add_worker(membership=self.membership, **serializer.validated_data)
+        data = serializer.validated_data
+        worker, _code = register.invite(membership=self.membership, salary_amount=data.pop("salary"), **data)
         return Response(WorkerSerializer(worker).data, status=status.HTTP_201_CREATED)
 
 
-class WorkerImportView(WritesNeedPayments, APIView):
+class WorkerImportView(WorkersNeedManage, APIView):
     parser_classes = (JSONParser, MultiPartParser, FormParser)
 
     def post(self, request, org_id):
         serializer = WorkerImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        result = services.import_workers(membership=self.membership, rows=serializer.validated_data["rows"])
+        result = register.import_workers(membership=self.membership, rows=serializer.validated_data["rows"])
         return Response(result)
 
 
-class WorkerDetailView(WritesNeedPayments, APIView):
+class WorkerDetailView(WorkersNeedManage, APIView):
+    def get(self, request, org_id, worker_id):
+        return Response(WorkerSerializer(register.get(self.membership, worker_id)).data)
+
     def patch(self, request, org_id, worker_id):
         serializer = WorkerUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        worker = services.update_worker(membership=self.membership, worker_id=worker_id, **serializer.validated_data)
-        return Response(WorkerSerializer(worker).data)
+        register.update(membership=self.membership, worker_id=worker_id, **serializer.validated_data)
+        return Response(WorkerSerializer(register.get(self.membership, worker_id)).data)
 
     def delete(self, request, org_id, worker_id):
-        services.update_worker(membership=self.membership, worker_id=worker_id, is_active=False)
+        """Removes the worker (or cancels the invitation or request); their pay history stays."""
+        register.deactivate(membership=self.membership, worker_id=worker_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkerActionView(OrgScopedMixin, APIView):
+    """POST .../workers/<id>/{approve,decline,suspend,reactivate,resend-invitation}/"""
+
+    ACTIONS = {
+        "approve": Perm.APPROVE_WORKER,
+        "decline": Perm.APPROVE_WORKER,
+        "suspend": Perm.MANAGE_WORKERS,
+        "reactivate": Perm.MANAGE_WORKERS,
+        "resend-invitation": Perm.MANAGE_WORKERS,
+    }
+
+    def perm_for(self, request):
+        perm = self.ACTIONS.get(self.kwargs["action"])
+        if perm is None:
+            raise BusinessError("Unknown action.", "not_found", status.HTTP_404_NOT_FOUND)
+        return perm
+
+    def post(self, request, org_id, worker_id, action):
+        serializer = WorkerActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data, ids = serializer.validated_data, {"membership": self.membership, "worker_id": worker_id}
+        if action == "approve":
+            if "salary" not in data:
+                raise BusinessError("Enter the worker's salary.", "salary_required")
+            worker = register.approve(**ids, salary_amount=data["salary"], job_title=data["job_title"],
+                                      employee_number=data["employee_number"])  # fmt: skip
+        elif action == "decline":
+            worker = register.decline(**ids, reason=data["reason"])
+        elif action == "suspend":
+            worker = register.suspend(**ids, reason=data["reason"])
+        elif action == "reactivate":
+            worker = register.reactivate(**ids)
+        else:
+            worker, _code = register.resend_invitation(**ids)
+        return Response(WorkerSerializer(worker).data)
+
+
+class JoinCodeView(OrgScopedMixin, APIView):
+    """GET/POST/DELETE .../worker-join-code/ — the code (and QR link) workers use to ask to join.
+
+    POST makes a new code (the old one stops working); DELETE switches joining by code off.
+    """
+
+    perm = Perm.APPROVE_WORKER
+
+    def get(self, request, org_id):
+        return Response(self.body(self.membership.organization.worker_join_code))
+
+    def post(self, request, org_id):
+        organization = register.set_join_code(membership=self.membership, enabled=True)
+        return Response(self.body(organization.worker_join_code), status=status.HTTP_201_CREATED)
+
+    def delete(self, request, org_id):
+        register.set_join_code(membership=self.membership, enabled=False)
+        return Response(self.body(None))
+
+    @staticmethod
+    def body(code):
+        if not code:
+            return {"enabled": False, "code": None, "link": None}
+        return {"enabled": True, "code": register.display_code(code),
+                "link": settings.WORKER_JOIN_LINK.format(code=code)}  # fmt: skip
+
+
+# --- The worker's own side ------------------------------------------------------------------------
+
+
+class CodeThrottled(APIView):
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "worker_codes"
+
+
+class InvitationPreviewView(CodeThrottled):
+    """POST /worker-invitations/preview/ {code} — who invited you, before you accept."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.preview_invitation(serializer.validated_data["code"])
+        return Response({"business": worker.organization.name, "name": worker.full_name,
+                         "job_title": worker.job_title, "expires_at": worker.invite_expires_at})  # fmt: skip
+
+
+class InvitationAcceptView(CodeThrottled):
+    """POST /worker-invitations/accept/ {code} — you start being paid by the business, into your own wallet."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.accept_invitation(user=request.user, code=serializer.validated_data["code"])
+        return Response(EmployerSerializer(worker).data)
+
+
+class JoinRequestView(CodeThrottled):
+    """POST /employers/join/ {code} — ask to join a business with its join code (typed, or scanned from its QR)."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.request_to_join(user=request.user, join_code=serializer.validated_data["code"])
+        return Response(EmployerSerializer(worker).data, status=status.HTTP_201_CREATED)
+
+
+class MyEmployersView(generics.ListAPIView):
+    """GET /employers/ — the businesses you work for, have asked to join, or are invited to by your account."""
+
+    serializer_class = EmployerSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return Worker.objects.select_related("organization", "wallet").filter(
+            user=self.request.user, status__in=Worker.OPEN
+        )
+
+
+class LeaveEmployerView(APIView):
+    """POST /employers/<id>/leave/ — stop working for a business. Your FluxPay account stays yours."""
+
+    def post(self, request, worker_id):
+        return Response(EmployerSerializer(register.leave(user=request.user, worker_id=worker_id)).data)
 
 
 # --- Pay runs -----------------------------------------------------------------------------------

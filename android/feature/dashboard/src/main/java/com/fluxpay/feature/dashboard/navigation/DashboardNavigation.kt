@@ -14,6 +14,8 @@ fun NavGraphBuilder.dashboardScreen(
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
     onOpenBudget: () -> Unit,
+    onOpenBusiness: (String) -> Unit,
+    onJoinEmployer: () -> Unit,
 ) {
     composable(DashboardRoutes.DASHBOARD) {
         DashboardScreen(
@@ -21,6 +23,8 @@ fun NavGraphBuilder.dashboardScreen(
             onSeeAllTransactions = onSeeAllTransactions,
             onTransactionClick = onTransactionClick,
             onOpenBudget = onOpenBudget,
+            onOpenBusiness = onOpenBusiness,
+            onJoinEmployer = onJoinEmployer,
         )
     }
 }

@@ -277,7 +277,7 @@ def business_books(request):
                 cb=cb,
                 pl=reports.income_statement(currency, start, end, organization=organization),
                 bs=reports.balance_sheet(currency, end, organization=organization),
-                workers=organization.workers.filter(is_active=True).count(),
+                workers=organization.workers.filter(status="ACTIVE").count(),
             )
     title = f"{organization.name} – books" if organization else "Business books"
     return _page(request, "accounting/business_books.html", title, **context)

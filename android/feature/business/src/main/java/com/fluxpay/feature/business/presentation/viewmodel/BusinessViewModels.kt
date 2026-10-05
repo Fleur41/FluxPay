@@ -10,11 +10,15 @@ import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.Business
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
+import com.fluxpay.core.domain.model.Employer
+import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.JoinCode
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.PayRun
 import com.fluxpay.core.domain.model.PayRunStatus
 import com.fluxpay.core.domain.model.Payslip
 import com.fluxpay.core.domain.model.Worker
+import com.fluxpay.core.domain.model.WorkerStatus
 import com.fluxpay.core.domain.repository.BusinessRepository
 import com.fluxpay.feature.business.navigation.BusinessRoutes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -92,7 +96,14 @@ class BusinessHubViewModel @Inject constructor(repository: BusinessRepository) :
 
 // --- One business --------------------------------------------------------------------------------
 
-data class BusinessHome(val business: Business, val wallet: BusinessWallet, val workers: Int, val payRuns: List<PayRun>) {
+data class BusinessHome(
+    val business: Business,
+    val wallet: BusinessWallet,
+    val workers: Int,
+    val payRuns: List<PayRun>,
+    /** Workers who asked to join with the join code and are waiting for an owner or admin. */
+    val joinRequests: Int = 0,
+) {
     val waitingForApproval: Int get() = payRuns.count { it.status == PayRunStatus.PENDING_APPROVAL }
 }
 
@@ -117,25 +128,46 @@ class BusinessHomeViewModel @Inject constructor(
             _state.update { it.copy(loading = it.data == null, error = null) }
             val business = async { repository.business(businessId) }
             val wallet = async { repository.wallet(businessId) }
-            val workers = async { repository.workers(businessId) }
+            val workers = async { repository.allWorkers(businessId) }
             val runs = async { repository.payRuns(businessId) }
             val b = business.await().orFail() ?: return@launch
             val w = wallet.await().orFail() ?: return@launch
             val ws = workers.await().orFail() ?: return@launch
             val rs = runs.await().orFail() ?: return@launch
-            _state.update { it.copy(data = BusinessHome(b, w, ws.size, rs), loading = false) }
+            val active = ws.count { it.status == WorkerStatus.ACTIVE }
+            val requests = ws.count { it.status == WorkerStatus.PENDING_ACTIVATION }
+            _state.update { it.copy(data = BusinessHome(b, w, active, rs, requests), loading = false) }
         }
     }
 }
 
 // --- Workers -------------------------------------------------------------------------------------
 
-data class Workers(val business: Business, val workers: List<Worker>, val search: String = "") {
-    val shown: List<Worker> get() = if (search.isBlank()) workers else workers.filter {
-        it.name.contains(search, ignoreCase = true) || it.accountNumber.startsWith(search) ||
-            it.jobTitle.contains(search, ignoreCase = true) || it.employeeNumber.equals(search, ignoreCase = true)
+/** The tabs of the workers screen, each a set of statuses. */
+enum class WorkerTab(val label: String, val statuses: Set<WorkerStatus>) {
+    ACTIVE("Active", setOf(WorkerStatus.ACTIVE)),
+    INVITED("Invited", setOf(WorkerStatus.INVITED)),
+    REQUESTS("Requests", setOf(WorkerStatus.PENDING_ACTIVATION)),
+    SUSPENDED("Suspended", setOf(WorkerStatus.SUSPENDED)),
+}
+
+data class Workers(
+    val business: Business,
+    val workers: List<Worker>,
+    val search: String = "",
+    val tab: WorkerTab = WorkerTab.ACTIVE,
+    /** Loaded for owners and admins only, who run the join code. */
+    val joinCode: JoinCode? = null,
+) {
+    fun count(tab: WorkerTab) = workers.count { it.status in tab.statuses }
+
+    val shown: List<Worker> get() = workers.filter { it.status in tab.statuses }.filter {
+        search.isBlank() || it.name.contains(search, ignoreCase = true) || it.accountNumber.startsWith(search) ||
+            it.phoneNumber.contains(search) || it.jobTitle.contains(search, ignoreCase = true) ||
+            it.employeeNumber.equals(search, ignoreCase = true)
     }
-    val monthlyPayroll get() = workers.fold(java.math.BigDecimal.ZERO) { sum, w -> sum + w.salary }
+    val active: List<Worker> get() = workers.filter { it.status == WorkerStatus.ACTIVE }
+    val monthlyPayroll get() = active.fold(java.math.BigDecimal.ZERO) { sum, w -> sum + (w.salary ?: java.math.BigDecimal.ZERO) }
 }
 
 @HiltViewModel
@@ -144,6 +176,7 @@ class WorkersViewModel @Inject constructor(
     repository: BusinessRepository,
 ) : BaseBusinessViewModel<Workers>(repository) {
     private val businessId: String = checkNotNull(savedState[BusinessRoutes.BUSINESS_ID])
+    private val startTab = savedState.get<String>(BusinessRoutes.TAB)?.let { tab -> WorkerTab.entries.firstOrNull { it.name == tab } }
 
     init { load() }
 
@@ -151,22 +184,70 @@ class WorkersViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(loading = it.data == null, error = null) }
             val business = async { repository.business(businessId) }
-            val workers = async { repository.workers(businessId) }
+            val workers = async { repository.allWorkers(businessId) }
             val b = business.await().orFail() ?: return@launch
             val ws = workers.await().orFail() ?: return@launch
-            _state.update { it.copy(data = Workers(b, ws, it.data?.search.orEmpty()), loading = false) }
+            val code = if (b.canApprove) (repository.joinCode(businessId) as? NetworkResult.Success)?.data else null
+            _state.update {
+                val old = it.data
+                it.copy(
+                    data = Workers(b, ws, old?.search.orEmpty(), old?.tab ?: startTab ?: WorkerTab.ACTIVE, code ?: old?.joinCode),
+                    loading = false,
+                )
+            }
         }
     }
 
     fun search(text: String) = _state.update { it.copy(data = it.data?.copy(search = text)) }
 
-    fun add(accountOrPhone: String, salary: String, jobTitle: String) =
-        act("Worker added") { repository.addWorker(businessId, accountOrPhone, salary, jobTitle) }
+    fun showTab(tab: WorkerTab) = _state.update { it.copy(data = it.data?.copy(tab = tab)) }
+
+    fun invite(name: String, phoneOrAccount: String, email: String, salary: String, jobTitle: String) =
+        act("Invitation sent. They'll appear under Active once they accept.") {
+            repository.inviteWorker(businessId, name, phoneOrAccount, email, salary, jobTitle)
+        }
 
     fun changeSalary(worker: Worker, salary: String) =
         act("${worker.name}'s salary updated") { repository.updateSalary(businessId, worker.id, salary) }
 
-    fun remove(worker: Worker) = act("${worker.name} removed from payroll") { repository.removeWorker(businessId, worker.id) }
+    /** Removes an active or suspended worker, or cancels an invitation. Their pay history stays. */
+    fun remove(worker: Worker) = act(
+        if (worker.status == WorkerStatus.INVITED) "Invitation cancelled" else "${worker.name} removed from payroll",
+    ) { repository.removeWorker(businessId, worker.id) }
+
+    fun resend(worker: Worker) = act("Invitation sent again with a new code") {
+        repository.workerAction(businessId, worker.id, "resend-invitation")
+    }
+
+    fun approve(worker: Worker, salary: String, jobTitle: String) = act("${worker.name} can now be paid") {
+        repository.workerAction(businessId, worker.id, "approve", salary = salary, jobTitle = jobTitle)
+    }
+
+    fun decline(worker: Worker, reason: String) = act("Request declined") {
+        repository.workerAction(businessId, worker.id, "decline", reason = reason)
+    }
+
+    fun suspend(worker: Worker, reason: String) = act("${worker.name} suspended: they can't be paid") {
+        repository.workerAction(businessId, worker.id, "suspend", reason = reason)
+    }
+
+    fun reactivate(worker: Worker) = act("${worker.name} is active again") {
+        repository.workerAction(businessId, worker.id, "reactivate")
+    }
+
+    fun setJoinCode(enabled: Boolean) {
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.setJoinCode(businessId, enabled)) {
+                is NetworkResult.Success -> _state.update {
+                    it.copy(busy = false, data = it.data?.copy(joinCode = result.data),
+                        message = if (enabled) "New join code: the old one no longer works" else "Joining by code is off")
+                }
+                is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
 
     fun import(csv: String) {
         viewModelScope.launch {
@@ -175,7 +256,7 @@ class WorkersViewModel @Inject constructor(
                 is NetworkResult.Success -> {
                     val r = result.data
                     val problems = if (r.errors.isEmpty()) "" else " ${r.errors.size} rows skipped: ${r.errors.take(3).joinToString("; ")}"
-                    _state.update { it.copy(busy = false, message = "Imported ${r.created} new, ${r.updated} updated.$problems") }
+                    _state.update { it.copy(busy = false, message = "Invited ${r.created} workers.$problems") }
                     load()
                 }
                 is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
@@ -183,6 +264,111 @@ class WorkersViewModel @Inject constructor(
             }
         }
     }
+}
+
+// --- As a worker: my employers, joining a business ---------------------------------------------------
+
+@HiltViewModel
+class EmployersViewModel @Inject constructor(repository: BusinessRepository) : BaseBusinessViewModel<List<Employer>>(repository) {
+    init { load() }
+
+    override fun load() {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = it.data == null, error = null) }
+            val employers = repository.myEmployers().orFail() ?: return@launch
+            _state.update { it.copy(data = employers, loading = false) }
+        }
+    }
+
+    fun leave(employer: Employer) = act(
+        if (employer.status == WorkerStatus.ACTIVE) "You left ${employer.business}" else "Cancelled",
+    ) { repository.leaveEmployer(employer.id) }
+}
+
+/**
+ * One code box for both kinds of code: a personal invitation (from SMS or email) is shown first so the worker
+ * can accept it; any other code is taken as a business's join code, and the business is asked to approve.
+ */
+data class JoinBusiness(
+    val code: String = "",
+    val invitation: InvitationPreview? = null,
+    /** Set once they joined or asked to: what to show, and the employer. */
+    val done: Employer? = null,
+)
+
+@HiltViewModel
+class JoinBusinessViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    repository: BusinessRepository,
+) : BaseBusinessViewModel<JoinBusiness>(repository) {
+    init {
+        _state.update { it.copy(data = JoinBusiness(), loading = false) }
+        // From a link: fluxpay://join-employer?code=... (invitation) or ?business=... (join code, e.g. a QR).
+        savedState.get<String>(BusinessRoutes.CODE)?.takeIf { it.isNotBlank() }?.let { onCode(it); submit() }
+        savedState.get<String>(BusinessRoutes.JOIN_CODE)?.takeIf { it.isNotBlank() }?.let { onCode(it); requestToJoin() }
+    }
+
+    override fun load() = Unit
+
+    fun onCode(code: String) = _state.update { it.copy(data = JoinBusiness(code = code)) }
+
+    /** A scanned QR code holds the business's join link; anything else is treated as a typed code. */
+    fun onScanned(raw: String) {
+        val uri = runCatching { android.net.Uri.parse(raw) }.getOrNull()
+        val business = uri?.takeIf { it.scheme == "fluxpay" }?.getQueryParameter("business")
+        val invite = uri?.takeIf { it.scheme == "fluxpay" }?.getQueryParameter("code")
+        onCode(business ?: invite ?: raw)
+        if (business != null) requestToJoin() else submit()
+    }
+
+    fun submit() {
+        val code = _state.value.data?.code?.trim().orEmpty()
+        if (code.isEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val preview = repository.previewInvitation(code)) {
+                is NetworkResult.Success -> _state.update {
+                    it.copy(busy = false, data = it.data?.copy(invitation = preview.data))
+                }
+                // Not a personal invitation: it may be a business's join code.
+                is NetworkResult.Error -> if (preview.httpStatus == 404) join(code) else fail(preview.message)
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+
+    fun accept() {
+        val code = _state.value.data?.code?.trim().orEmpty()
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.acceptInvitation(code)) {
+                is NetworkResult.Success -> _state.update { it.copy(busy = false, data = it.data?.copy(done = result.data)) }
+                is NetworkResult.Error -> fail(result.message)
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+
+    private fun requestToJoin() {
+        val code = _state.value.data?.code?.trim().orEmpty()
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            join(code)
+        }
+    }
+
+    private suspend fun join(code: String) {
+        when (val result = repository.requestToJoin(code)) {
+            is NetworkResult.Success -> _state.update { it.copy(busy = false, data = it.data?.copy(done = result.data)) }
+            is NetworkResult.Error -> fail(
+                if (result.httpStatus == 404) "That code isn't valid or has expired. Check it, or ask the business for a new one."
+                else result.message,
+            )
+            NetworkResult.Loading -> Unit
+        }
+    }
+
+    private fun fail(message: String) = _state.update { it.copy(busy = false, message = message) }
 }
 
 // --- Pay runs ------------------------------------------------------------------------------------

@@ -22,12 +22,47 @@ data class WorkerDto(
     val currency: String,
     @Json(name = "employee_number") val employeeNumber: String = "",
     @Json(name = "job_title") val jobTitle: String = "",
-    val salary: BigDecimal,
+    // Null only on a join request the business hasn't approved yet.
+    val salary: BigDecimal? = null,
     @Json(name = "is_active") val isActive: Boolean = true,
+    val status: String = "ACTIVE",
+    @Json(name = "status_label") val statusLabel: String = "",
+    @Json(name = "status_note") val statusNote: String = "",
+    @Json(name = "phone_number") val phoneNumber: String = "",
+    val email: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkerActionDto(val salary: String? = null, @Json(name = "job_title") val jobTitle: String? = null, val reason: String? = null)
+
+@JsonClass(generateAdapter = true)
+data class JoinCodeDto(val enabled: Boolean, val code: String? = null, val link: String? = null)
+
+@JsonClass(generateAdapter = true)
+data class CodeDto(val code: String)
+
+@JsonClass(generateAdapter = true)
+data class InvitationPreviewDto(
+    val business: String,
+    val name: String,
+    @Json(name = "job_title") val jobTitle: String = "",
+)
+
+/** A worker's own view of a business they work for, are invited to, or asked to join. */
+@JsonClass(generateAdapter = true)
+data class EmployerDto(
+    val id: String,
+    val business: String,
+    @Json(name = "job_title") val jobTitle: String = "",
+    val status: String,
+    @Json(name = "status_label") val statusLabel: String,
+    @Json(name = "account_number") val accountNumber: String = "",
 )
 
 @JsonClass(generateAdapter = true)
 data class WorkerCreateDto(
+    @Json(name = "full_name") val fullName: String = "",
+    val email: String = "",
     @Json(name = "account_number") val accountNumber: String = "",
     @Json(name = "phone_number") val phoneNumber: String = "",
     val salary: String,

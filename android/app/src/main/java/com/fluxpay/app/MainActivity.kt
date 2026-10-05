@@ -45,6 +45,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             val uiState by mainViewModel.uiState.collectAsStateWithLifecycle()
             val pendingDeepLink by mainViewModel.pendingDeepLink.collectAsStateWithLifecycle()
+            val showBusinessTab by mainViewModel.showBusinessTab.collectAsStateWithLifecycle()
             val warningSeconds by sessionViewModel.warningSecondsLeft.collectAsStateWithLifecycle()
             val timedOutAfterMinutes by sessionViewModel.timedOutAfterMinutes.collectAsStateWithLifecycle()
 
@@ -52,6 +53,7 @@ class MainActivity : FragmentActivity() {
             FluxPayTheme(themeMode = ready.themeMode) {
                 FluxPayApp(
                     isLoggedIn = ready.isLoggedIn,
+                    showBusinessTab = showBusinessTab,
                     pendingDeepLink = pendingDeepLink,
                     onDeepLinkConsumed = mainViewModel::onDeepLinkConsumed,
                     sessionWarningSeconds = warningSeconds,

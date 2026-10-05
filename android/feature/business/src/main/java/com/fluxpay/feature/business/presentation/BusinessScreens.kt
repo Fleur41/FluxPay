@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -98,7 +99,7 @@ private val listPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, 
 
 /** Shows loading, a load error with retry, one-off messages as a snackbar, and a busy bar while saving. */
 @Composable
-private fun <T> ScreenBody(
+internal fun <T> ScreenBody(
     state: Screen<T>,
     snackbar: SnackbarHostState,
     padding: PaddingValues,
@@ -113,7 +114,9 @@ private fun <T> ScreenBody(
         }
     }
     val data = state.data
-    Box(Modifier.padding(padding).fillMaxSize()) {
+    Box(Modifier
+        .padding(padding)
+        .fillMaxSize()) {
         when {
             data == null && state.error != null -> ErrorBanner(state.error, Modifier.padding(16.dp), onRetry = onRetry)
             data == null -> FullScreenLoading()
@@ -121,7 +124,9 @@ private fun <T> ScreenBody(
                 content(data)
             }
         }
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+        if (state.busy) LinearProgressIndicator(Modifier
+            .fillMaxWidth()
+            .align(Alignment.TopCenter))
     }
 }
 
@@ -136,7 +141,10 @@ private fun runTone(status: PayRunStatus) = when (status) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BusinessHubScreen(onOpenBusiness: (String) -> Unit, viewModel: BusinessHubViewModel = hiltViewModel()) {
+fun BusinessHubScreen(
+    onOpenBusiness: (String) -> Unit,
+    viewModel: BusinessHubViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     Scaffold(topBar = { TopAppBar(title = { Text("Business") }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
@@ -149,7 +157,9 @@ fun BusinessHubScreen(onOpenBusiness: (String) -> Unit, viewModel: BusinessHubVi
                 }
             }
             items(hub.businesses, key = { it.id }) { business ->
-                Card(Modifier.fillMaxWidth().clickable { onOpenBusiness(business.id) },
+                Card(Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenBusiness(business.id) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Avatar(business.name)
@@ -188,12 +198,13 @@ fun BusinessHubScreen(onOpenBusiness: (String) -> Unit, viewModel: BusinessHubVi
     }
 }
 
+
 // --- Business home -------------------------------------------------------------------------------
 
 @Composable
 fun BusinessHomeScreen(
     onBack: () -> Unit,
-    onWorkers: (String) -> Unit,
+    onWorkers: (String, String?) -> Unit,
     onPayRuns: (String) -> Unit,
     onBooks: (String) -> Unit,
     viewModel: BusinessHomeViewModel = hiltViewModel(),
@@ -211,8 +222,9 @@ fun BusinessHomeScreen(
                     footer = "Account ${home.wallet.accountNumber}. Workers are paid from here.")
             }
             item {
-                ActionCard(Icons.Outlined.Badge, "Workers", "${home.workers} on the payroll. Add, import or change salaries.",
-                    onClick = { onWorkers(id) })
+                val requests = home.joinRequests.takeIf { it > 0 }?.let { if (it == 1) "1 request to join" else "$it requests to join" }
+                ActionCard(Icons.Outlined.Badge, "Workers", "${home.workers} on the payroll. Invite workers, approve requests, change salaries.",
+                    onClick = { onWorkers(id, if (requests != null) "REQUESTS" else null) }, badge = requests)
             }
             item {
                 val badge = home.waitingForApproval.takeIf { it > 0 }?.let { "$it to approve" }
@@ -233,7 +245,9 @@ fun BusinessHomeScreen(
 
 @Composable
 private fun PayRunCard(run: PayRun, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick),
+    Card(Modifier
+        .fillMaxWidth()
+        .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,94 +266,13 @@ private fun PayRunCard(run: PayRun, onClick: () -> Unit) {
 
 // --- Workers -------------------------------------------------------------------------------------
 
-@Composable
-fun WorkersScreen(onBack: () -> Unit, viewModel: WorkersViewModel = hiltViewModel()) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var adding by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Worker?>(null) }
-    var removing by remember { mutableStateOf<Worker?>(null) }
-    val pickCsv = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) scope.launch {
-            val text = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            }
-            if (text != null) viewModel.import(text)
-        }
-    }
-    val canEdit = state.data?.business?.canPrepare == true
-    Scaffold(
-        topBar = {
-            BackTopBar("Workers", state.data?.let { "${it.workers.size} on payroll · ${money(it.monthlyPayroll, it.workers.firstOrNull()?.currency ?: "")} a month" }, onBack) {
-                if (canEdit) IconButton(onClick = { pickCsv.launch("text/*") }) { Icon(Icons.Outlined.UploadFile, "Import workers from a CSV file") }
-            }
-        },
-        floatingActionButton = {
-            if (canEdit) ExtendedFloatingActionButton(onClick = { adding = true }, icon = { Icon(Icons.Outlined.PersonAdd, null) },
-                text = { Text("Add worker") })
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
-        ScreenBody(state, snackbar, padding, viewModel::load, viewModel::messageShown) { data ->
-            item {
-                FluxTextField(value = data.search, onValueChange = viewModel::search, label = "Search name, job or account number")
-            }
-            if (data.workers.isEmpty()) {
-                item {
-                    EmptyState(Icons.Outlined.Badge, "No workers yet",
-                        "Add workers by their FluxPay account number or phone number, or import a CSV file with columns account_number, salary, job_title.")
-                }
-            }
-            items(data.shown, key = { it.id }) { worker ->
-                var menu by remember { mutableStateOf(false) }
-                Row(Modifier.fillMaxWidth().clickable(enabled = canEdit) { menu = true }.padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Avatar(worker.name, size = 40)
-                    Column(Modifier.weight(1f)) {
-                        Text(worker.name, style = MaterialTheme.typography.bodyLarge)
-                        Text(listOf(worker.jobTitle, worker.accountNumber).filter { it.isNotBlank() }.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(money(worker.salary, worker.currency), style = MaterialTheme.typography.bodyMedium)
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Change salary") }, onClick = { menu = false; editing = worker })
-                        DropdownMenuItem(text = { Text("Remove from payroll") }, onClick = { menu = false; removing = worker })
-                    }
-                }
-                HorizontalDivider()
-            }
-        }
-    }
-    if (adding) {
-        InputDialog(
-            title = "Add worker",
-            message = "The worker must have a FluxPay account. Their pay lands in their own wallet.",
-            fields = listOf(
-                Triple("Account number or phone number", KeyboardType.Phone, ""),
-                Triple("Monthly salary", KeyboardType.Decimal, ""),
-                Triple("Job title (optional)", KeyboardType.Text, ""),
-            ),
-            confirm = "Add",
-            onConfirm = { (who, salary, job) -> adding = false; viewModel.add(who, salary, job) },
-            onDismiss = { adding = false },
-        )
-    }
-    editing?.let { worker ->
-        InputDialog("Change salary", worker.name, listOf(Triple("Monthly salary", KeyboardType.Decimal, worker.salary.toPlainString())),
-            "Save", onConfirm = { (salary) -> editing = null; viewModel.changeSalary(worker, salary) }, onDismiss = { editing = null })
-    }
-    removing?.let { worker ->
-        InputDialog("Remove ${worker.name}?", "They won't be in future pay runs. Past payslips stay on record.", emptyList(),
-            "Remove", onConfirm = { removing = null; viewModel.remove(worker) }, onDismiss = { removing = null }, destructive = true)
-    }
-}
-
 // --- Pay runs ------------------------------------------------------------------------------------
 
 @Composable
-fun PayRunsScreen(onBack: () -> Unit, onOpenRun: (String, String) -> Unit, viewModel: PayRunsViewModel = hiltViewModel()) {
+fun PayRunsScreen(
+    onBack: () -> Unit, onOpenRun: (String, String) -> Unit,
+    viewModel: PayRunsViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var creating by remember { mutableStateOf(false) }
@@ -375,7 +308,10 @@ fun PayRunsScreen(onBack: () -> Unit, onOpenRun: (String, String) -> Unit, viewM
 }
 
 @Composable
-fun PayRunDetailScreen(onBack: () -> Unit, viewModel: PayRunDetailViewModel = hiltViewModel()) {
+fun PayRunDetailScreen(
+    onBack: () -> Unit,
+    viewModel: PayRunDetailViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var dialog by remember { mutableStateOf<String?>(null) } // approve / reject / cancel / submit
@@ -436,9 +372,13 @@ fun PayRunDetailScreen(onBack: () -> Unit, viewModel: PayRunDetailViewModel = hi
             items(detail.shown, key = { it.id }) { payslip ->
                 val tappable = (run.status == PayRunStatus.DRAFT && business.canPrepare) ||
                     (run.status == PayRunStatus.PAID && payslip.isPaid && business.canApprove)
-                Row(Modifier.fillMaxWidth().clickable(enabled = tappable) {
-                    if (run.status == PayRunStatus.DRAFT) editing = payslip else reversing = payslip
-                }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = tappable) {
+                        if (run.status == PayRunStatus.DRAFT) editing = payslip else reversing =
+                            payslip
+                    }
+                    .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Avatar(payslip.workerName, size = 36)
                     Column(Modifier.weight(1f)) {
                         Text(payslip.workerName)
@@ -486,7 +426,10 @@ fun PayRunDetailScreen(onBack: () -> Unit, viewModel: PayRunDetailViewModel = hi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BooksScreen(onBack: () -> Unit, viewModel: BooksViewModel = hiltViewModel()) {
+fun BooksScreen(
+    onBack: () -> Unit,
+    viewModel: BooksViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
@@ -531,7 +474,10 @@ fun BooksScreen(onBack: () -> Unit, viewModel: BooksViewModel = hiltViewModel())
                     item { EmptyState(Icons.Outlined.AccountBalanceWallet, "No money moved", "Nothing in or out in this period.") }
                 }
                 items(books.cashbook.entries, key = { it.id }) { entry ->
-                    Row(Modifier.fillMaxWidth().clickable(enabled = books.business.canPrepare) { refiling = entry }.padding(vertical = 6.dp),
+                    Row(Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = books.business.canPrepare) { refiling = entry }
+                        .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(entry.counterparty.ifBlank { entry.sourceLabel }, maxLines = 1)
@@ -571,7 +517,9 @@ fun BooksScreen(onBack: () -> Unit, viewModel: BooksViewModel = hiltViewModel())
             if (entry.isMoneyIn) it.type in setOf("INCOME", "EQUITY", "EXPENSE") else it.type in setOf("EXPENSE", "EQUITY", "INCOME")
         }
         ModalBottomSheet(onDismissRequest = { refiling = null }) {
-            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+            Column(Modifier
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)) {
                 Text("File ${money(entry.amount, state.data?.cashbook?.currency ?: "")} under", style = MaterialTheme.typography.titleMedium)
                 Text(entry.counterparty, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 categories.forEach { category ->

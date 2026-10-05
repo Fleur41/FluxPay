@@ -150,6 +150,7 @@ REST_FRAMEWORK = {
         "transfers": "20/min",
         "deposits": "10/min",
         "statements": "10/min",
+        "worker_codes": "30/hour",  # entering invitation and join codes
     },
     "EXCEPTION_HANDLER": "fluxpay.exceptions.api_exception_handler",
 }
@@ -172,6 +173,9 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "FluxPay <no-reply@flu
 PASSWORD_RESET_LINK = os.environ.get("PASSWORD_RESET_LINK", "fluxpay://reset-password?uid={uid}&token={token}")
 # Deep link in business invitation emails.
 ORG_INVITE_LINK = os.environ.get("ORG_INVITE_LINK", "fluxpay://join-business?token={token}")
+# Deep links for workers: a personal invitation (SMS/email), and a business's join code (shown as a QR code).
+WORKER_INVITE_LINK = os.environ.get("WORKER_INVITE_LINK", "fluxpay://join-employer?code={code}")
+WORKER_JOIN_LINK = os.environ.get("WORKER_JOIN_LINK", "fluxpay://join-employer?business={code}")
 
 # External payments (payments app)
 # Rail -> provider adapter class. A rail is enabled below once it is configured; the fake one exists only in tests.

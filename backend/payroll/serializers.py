@@ -19,26 +19,45 @@ class PayslipStatusField(serializers.CharField):
 
 
 class WorkerSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(source="wallet.owner.full_name", read_only=True)
-    account_number = serializers.CharField(source="wallet.account_number", read_only=True)
-    currency = serializers.CharField(source="wallet.currency", read_only=True)
+    """`account_number` is empty, never null, until the worker joins (older apps expect a string); `currency` is
+    the business's until then, so an invitation's salary still shows its currency."""
+
+    name = serializers.CharField(read_only=True)
+    account_number = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Worker
-        fields = ("id", "name", "account_number", "currency", "employee_number", "job_title", "salary", "is_active",
+        fields = ("id", "name", "account_number", "currency", "phone_number", "email", "employee_number", "job_title",
+                  "salary", "status", "status_label", "status_note", "is_active", "invite_expires_at", "activated_at",
                   "created_at")  # fmt: skip
+
+    def get_account_number(self, worker) -> str:
+        return worker.wallet.account_number if worker.wallet_id else ""
+
+    def get_currency(self, worker) -> str:
+        if worker.wallet_id:
+            return worker.wallet.currency
+        cashbook = worker.organization.accounts.first()  # a business has exactly one
+        return cashbook.currency if cashbook else ""
 
 
 class WorkerCreateSerializer(serializers.Serializer):
+    """An invitation: by FluxPay account number, or by phone (with a name, and optionally an email)."""
+
+    full_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     account_number = serializers.CharField(max_length=10, required=False, allow_blank=True, default="")
     phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
-    salary = serializers.CharField(max_length=20)  # "12,500" is fine: payroll.services parses it
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+    salary = serializers.CharField(max_length=20)  # "12,500" is fine: payroll.workers parses it
     employee_number = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
     job_title = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
 
     def validate(self, data):
         if not data["account_number"] and not data["phone_number"]:
-            raise serializers.ValidationError("Give the worker's FluxPay account number or phone number.")
+            raise serializers.ValidationError("Give the worker's phone number or FluxPay account number.")
         return data
 
 
@@ -46,11 +65,40 @@ class WorkerUpdateSerializer(serializers.Serializer):
     salary = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"), required=False)
     employee_number = serializers.CharField(max_length=30, required=False, allow_blank=True)
     job_title = serializers.CharField(max_length=80, required=False, allow_blank=True)
-    is_active = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)  # older apps: False removes, True reactivates
+
+
+class WorkerActionSerializer(serializers.Serializer):
+    """approve: salary (required), job_title, employee_number. decline, suspend, remove: reason."""
+
+    salary = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"), required=False)
+    job_title = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
+    employee_number = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
+    reason = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+
+class CodeSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=20)
+
+
+class EmployerSerializer(serializers.ModelSerializer):
+    """A worker's own view of a business they work for (or are invited to, or asked to join)."""
+
+    business = serializers.CharField(source="organization.name", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    account_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Worker
+        fields = ("id", "business", "job_title", "employee_number", "status", "status_label", "account_number",
+                  "activated_at", "created_at")  # fmt: skip
+
+    def get_account_number(self, worker) -> str:
+        return worker.wallet.account_number if worker.wallet_id else ""
 
 
 class WorkerImportSerializer(serializers.Serializer):
-    """Either `rows` (JSON) or `file` (a CSV with columns account_number/phone_number, salary, ...)."""
+    """Either `rows` (JSON) or `file` (a CSV with columns account_number or phone_number and full_name, salary, ...)."""
 
     rows = serializers.ListField(child=serializers.DictField(), required=False, max_length=5000)
     file = serializers.FileField(required=False)

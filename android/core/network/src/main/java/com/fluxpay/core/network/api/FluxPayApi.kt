@@ -21,6 +21,10 @@ import com.fluxpay.core.network.dto.UserDto
 import com.fluxpay.core.network.dto.AmountDto
 import com.fluxpay.core.network.dto.BooksSummaryDto
 import com.fluxpay.core.network.dto.CashbookDto
+import com.fluxpay.core.network.dto.CodeDto
+import com.fluxpay.core.network.dto.EmployerDto
+import com.fluxpay.core.network.dto.InvitationPreviewDto
+import com.fluxpay.core.network.dto.JoinCodeDto
 import com.fluxpay.core.network.dto.CategoryCreateDto
 import com.fluxpay.core.network.dto.CategoryDto
 import com.fluxpay.core.network.dto.BookEntryDto
@@ -32,6 +36,7 @@ import com.fluxpay.core.network.dto.PayRunDto
 import com.fluxpay.core.network.dto.PayslipDto
 import com.fluxpay.core.network.dto.ReasonDto
 import com.fluxpay.core.network.dto.ReclassifyDto
+import com.fluxpay.core.network.dto.WorkerActionDto
 import com.fluxpay.core.network.dto.WorkerCreateDto
 import com.fluxpay.core.network.dto.WorkerDto
 import com.fluxpay.core.network.dto.WorkerImportDto
@@ -131,7 +136,42 @@ interface FluxPayApi {
         @Path("org") org: String,
         @Query("page") page: Int = 1,
         @Query("search") search: String? = null,
+        @Query("active") active: String? = null, // "all": every status, not just active workers
     ): PageDto<WorkerDto>
+
+    /** approve, decline, suspend, reactivate or resend-invitation. */
+    @POST("api/v1/organizations/{org}/workers/{id}/{action}/")
+    suspend fun workerAction(
+        @Path("org") org: String,
+        @Path("id") id: String,
+        @Path("action") action: String,
+        @Body body: WorkerActionDto,
+    ): WorkerDto
+
+    @GET("api/v1/organizations/{org}/worker-join-code/")
+    suspend fun joinCode(@Path("org") org: String): JoinCodeDto
+
+    /** A new join code; the old one stops working. */
+    @POST("api/v1/organizations/{org}/worker-join-code/")
+    suspend fun newJoinCode(@Path("org") org: String): JoinCodeDto
+
+    @DELETE("api/v1/organizations/{org}/worker-join-code/")
+    suspend fun disableJoinCode(@Path("org") org: String): JoinCodeDto
+
+    @POST("api/v1/worker-invitations/preview/")
+    suspend fun previewInvitation(@Body body: CodeDto): InvitationPreviewDto
+
+    @POST("api/v1/worker-invitations/accept/")
+    suspend fun acceptInvitation(@Body body: CodeDto): EmployerDto
+
+    @GET("api/v1/employers/")
+    suspend fun myEmployers(): List<EmployerDto>
+
+    @POST("api/v1/employers/join/")
+    suspend fun requestToJoin(@Body body: CodeDto): EmployerDto
+
+    @POST("api/v1/employers/{id}/leave/")
+    suspend fun leaveEmployer(@Path("id") id: String): EmployerDto
 
     @POST("api/v1/organizations/{org}/workers/")
     suspend fun addWorker(@Path("org") org: String, @Body body: WorkerCreateDto): WorkerDto

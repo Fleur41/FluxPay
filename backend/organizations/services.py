@@ -516,7 +516,7 @@ def _recipient(organization, type_: str, worker_id, account_number: str):
     if type_ in Payment.WORKER_TYPES:
         worker = (
             Worker.objects.select_related("wallet__owner")
-            .filter(id=worker_id, organization=organization, is_active=True)
+            .filter(id=worker_id, organization=organization, status=Worker.Status.ACTIVE)
             .first()
             if worker_id
             else None

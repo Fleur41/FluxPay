@@ -13,7 +13,7 @@ transfers in one transaction can't deadlock with a worker spending money at the 
 """
 
 import uuid
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.db import transaction as db_transaction
 from django.utils import timezone
@@ -25,8 +25,8 @@ from fluxpay.exceptions import BusinessError
 from organizations import services as payments
 from organizations.models import Payment
 from organizations.roles import Perm, has_perm
-from users.models import User
 
+from . import workers as register
 from .models import PayRun, Worker
 
 S = PayRun.Status
@@ -45,136 +45,6 @@ def _business_wallet(organization, account_id=None) -> Account:
     return wallet
 
 
-# --- Workers ------------------------------------------------------------------------------------
-
-
-def find_wallet(*, account_number: str = "", phone_number: str = "", currency: str) -> Account:
-    """A worker's personal wallet, by its account number or the phone number they signed up with."""
-    account_number, phone_number = (account_number or "").strip(), (phone_number or "").strip()
-    personal = Account.objects.filter(
-        system_key__isnull=True, organization__isnull=True, is_active=True
-    ).select_related("owner")
-    if account_number:
-        wallet = personal.filter(account_number=account_number).first()
-    elif phone_number:
-        user = User.objects.filter(phone_number=phone_number, is_active=True).first()
-        wallet = personal.filter(owner=user, currency=currency).order_by("created_at").first() if user else None
-    else:
-        raise BusinessError("Give the worker's FluxPay account number or phone number.", "worker_required")
-    if wallet is None:
-        raise BusinessError(
-            "No FluxPay personal wallet found. The worker must sign up for FluxPay first.", "worker_not_found", 404
-        )
-    if wallet.currency != currency:
-        raise BusinessError(f"The worker's wallet is in {wallet.currency}; payroll pays {currency}.", "currency_mismatch")
-    return wallet
-
-
-def _salary(value) -> Decimal:
-    try:
-        amount = Decimal(str(value).replace(",", "").strip())
-    except (InvalidOperation, ValueError):
-        raise BusinessError("Enter the salary as a number, e.g. 25000.", "invalid_salary") from None
-    if amount <= 0:
-        raise BusinessError("The salary must be more than zero.", "invalid_salary")
-    return amount.quantize(Decimal("0.01"))
-
-
-def add_worker(*, membership, account_number="", phone_number="", salary, employee_number="", job_title="",
-               audit=True) -> tuple[Worker, bool]:  # fmt: skip
-    """Adds a worker (or brings back one who left). Returns (worker, created)."""
-    _require(membership, Perm.INITIATE_PAYMENT)
-    organization = membership.organization
-    payroll_wallet = _business_wallet(organization)
-    wallet = find_wallet(account_number=account_number, phone_number=phone_number, currency=payroll_wallet.currency)
-    salary = _salary(salary)
-    worker, created = Worker.objects.get_or_create(
-        organization=organization,
-        wallet=wallet,
-        defaults={
-            "salary": salary,
-            "employee_number": employee_number.strip()[:30],
-            "job_title": job_title.strip()[:80],
-            "added_by": membership.user,
-        },
-    )
-    if not created:
-        if worker.is_active and audit:
-            raise BusinessError(f"{worker.name} is already on the payroll.", "already_worker")
-        worker.salary, worker.is_active = salary, True
-        worker.employee_number = employee_number.strip()[:30] or worker.employee_number
-        worker.job_title = job_title.strip()[:80] or worker.job_title
-        worker.save(update_fields=["salary", "is_active", "employee_number", "job_title", "updated_at"])
-    if audit:
-        record(
-            "payroll.worker_added", actor=membership.user, organization_id=organization.id, target=worker,
-            metadata={"name": worker.name, "account": wallet.account_number, "salary": str(salary)},
-        )  # fmt: skip
-    return worker, created
-
-
-def import_workers(*, membership, rows: list[dict]) -> dict:
-    """Adds many workers at once (e.g. from a spreadsheet). Good rows are saved; bad rows are reported back.
-
-    Each row: account_number or phone_number, salary, and optionally employee_number and job_title.
-    """
-    _require(membership, Perm.INITIATE_PAYMENT)
-    created = updated = 0
-    errors = []
-    with db_transaction.atomic():
-        for number, row in enumerate(rows, start=1):
-            try:
-                with db_transaction.atomic():
-                    _worker, was_created = add_worker(
-                        membership=membership,
-                        account_number=str(row.get("account_number") or ""),
-                        phone_number=str(row.get("phone_number") or ""),
-                        salary=row.get("salary"),
-                        employee_number=str(row.get("employee_number") or ""),
-                        job_title=str(row.get("job_title") or ""),
-                        audit=False,
-                    )
-            except BusinessError as exc:
-                errors.append({"row": number, "error": str(exc.detail)})
-                continue
-            created += was_created
-            updated += not was_created
-        record(
-            "payroll.workers_imported", actor=membership.user, organization_id=membership.organization_id,
-            target=membership.organization, metadata={"created": created, "updated": updated, "errors": len(errors)},
-        )  # fmt: skip
-    return {"created": created, "updated": updated, "errors": errors}
-
-
-def update_worker(*, membership, worker_id, **changes) -> Worker:
-    _require(membership, Perm.INITIATE_PAYMENT)
-    with db_transaction.atomic():
-        worker = _worker(membership, worker_id, lock=True)
-        before = {}
-        if "salary" in changes:
-            changes["salary"] = _salary(changes["salary"])
-        for field in ("salary", "job_title", "employee_number", "is_active"):
-            if field in changes and getattr(worker, field) != changes[field]:
-                before[field] = str(getattr(worker, field))
-                setattr(worker, field, changes[field])
-        if before:
-            worker.save(update_fields=[*before, "updated_at"])
-            record(
-                "payroll.worker_changed" if worker.is_active else "payroll.worker_removed",
-                actor=membership.user, organization_id=worker.organization_id, target=worker,
-                metadata={"name": worker.name, "before": before, "after": {f: str(getattr(worker, f)) for f in before}},
-            )  # fmt: skip
-    return worker
-
-
-def _worker(membership, worker_id, *, lock=False) -> Worker:
-    workers = Worker.objects.select_related("wallet__owner").filter(organization_id=membership.organization_id)
-    worker = (workers.select_for_update() if lock else workers).filter(id=worker_id).first()
-    if worker is None:
-        raise BusinessError("Worker not found.", "worker_not_found", 404)
-    return worker
-
-
 # --- Pay runs -----------------------------------------------------------------------------------
 
 
@@ -184,7 +54,9 @@ def create_pay_run(*, membership, title: str, pay_date, source_account_id=None, 
     _require(membership, Perm.INITIATE_PAYMENT)
     organization = membership.organization
     wallet = _business_wallet(organization, source_account_id)
-    workers = Worker.objects.filter(organization=organization, is_active=True, wallet__currency=wallet.currency)
+    workers = Worker.objects.filter(
+        organization=organization, status=Worker.Status.ACTIVE, wallet__currency=wallet.currency
+    ).select_related("wallet__owner")
     if worker_ids:
         workers = workers.filter(id__in=worker_ids)
     workers = list(workers)
@@ -239,7 +111,7 @@ def update_payslip(*, membership, run_id, payslip_id, amount=None, remove=False)
                 raise BusinessError("A pay run needs at least one worker. Cancel it instead.", "last_payslip")
             payslip.delete()  # never paid: a draft line
         else:
-            payslip.amount = _salary(amount)
+            payslip.amount = register.salary(amount)
             payslip.save(update_fields=["amount", "updated_at"])
     return run
 
@@ -253,9 +125,9 @@ def add_payslip(*, membership, run_id, worker_id, amount, type_: str = Payment.T
         run = _run(membership, run_id, lock=True)
         if run.status != S.DRAFT:
             raise BusinessError("Only a draft pay run can be changed.", "not_draft")
-        worker = _worker(membership, worker_id)
-        if not worker.is_active:
-            raise BusinessError(f"{worker.name} no longer works here.", "worker_not_found", 404)
+        worker = register.get(membership, worker_id)
+        if worker.status != Worker.Status.ACTIVE:
+            raise BusinessError(f"{worker.name} isn't an active worker.", "worker_not_active")
         if worker.wallet.currency != run.source_account.currency:
             raise BusinessError(f"{worker.name}'s wallet is in {worker.wallet.currency}.", "currency_mismatch")
         if run.payslips.filter(worker=worker, type=type_).exists():
@@ -263,7 +135,7 @@ def add_payslip(*, membership, run_id, worker_id, amount, type_: str = Payment.T
                 f"{worker.name} already has a {Payment.Type(type_).label.lower()} in this pay run. Change its amount instead.",
                 "duplicate_payslip",
             )
-        _payslip(run, worker, _salary(amount), type_).save()
+        _payslip(run, worker, register.salary(amount), type_).save()
     return run
 
 
@@ -356,6 +228,11 @@ def _pay(run: PayRun, *, actor) -> None:
     list(Account.objects.select_for_update().filter(id__in=ids).order_by("id"))
     _check_funds(run, amount)
     for payslip in payslips:
+        if payslip.worker.status != Worker.Status.ACTIVE:
+            raise BusinessError(
+                f"{payslip.worker.name} is {payslip.worker.get_status_display().lower()}. Remove them from this pay run.",
+                "worker_not_active",
+            )
         if not payslip.worker.wallet.is_active:
             raise BusinessError(f"{payslip.worker.name}'s wallet is closed. Remove them from this pay run.", "wallet_closed")
         payments.send_payment(payslip, actor=actor)

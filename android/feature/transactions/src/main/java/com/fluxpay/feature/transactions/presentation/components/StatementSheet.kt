@@ -54,13 +54,14 @@ fun StatementSheet(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val dates = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = {
             viewModel.reset()
             onDismiss()
         },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
     ) {
         Column(
             Modifier

@@ -34,6 +34,8 @@ dependencies {
     implementation(project(":core:ui"))
 
     implementation(libs.androidx.activity.compose) // picking a CSV file of workers
+    implementation(libs.zxing.core) // drawing the business's join code as a QR code
+    implementation(libs.play.services.code.scanner) // workers scanning it
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)

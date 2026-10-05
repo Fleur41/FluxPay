@@ -32,7 +32,10 @@ import com.fluxpay.feature.budget.presentation.viewmodel.BudgetViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BudgetScreen(onBack: () -> Unit, viewModel: BudgetViewModel = hiltViewModel()) {
+fun BudgetScreen(
+    onBack: () -> Unit, viewModel:
+    BudgetViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(

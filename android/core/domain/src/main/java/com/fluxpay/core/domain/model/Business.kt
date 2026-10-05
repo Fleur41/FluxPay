@@ -15,15 +15,58 @@ data class Business(val id: String, val name: String, val role: String, val isAc
 
 data class BusinessWallet(val id: String, val accountNumber: String, val currency: String, val balance: BigDecimal)
 
+/** One of the user's businesses with its cashbook; the cashbook is null if it couldn't be loaded. */
+data class BusinessBalance(val business: Business, val cashbook: BusinessWallet?)
+
+/**
+ * Someone a business pays. They join only by accepting an invitation, or by asking with the business's join
+ * code and being approved; their FluxPay login is their own.
+ */
 data class Worker(
     val id: String,
     val name: String,
+    /** Empty until they join. */
     val accountNumber: String,
     val currency: String,
     val employeeNumber: String,
     val jobTitle: String,
-    val salary: BigDecimal,
+    /** Null only on a join request that hasn't been approved yet. */
+    val salary: BigDecimal?,
+    val status: WorkerStatus = WorkerStatus.ACTIVE,
+    val statusLabel: String = "",
+    /** Why they were suspended, declined or removed. */
+    val statusNote: String = "",
+    val phoneNumber: String = "",
 )
+
+enum class WorkerStatus {
+    /** The business invited them; they haven't accepted yet. */
+    INVITED,
+
+    /** They asked to join with the business's join code; waiting for an owner or admin. */
+    PENDING_ACTIVATION,
+    ACTIVE,
+
+    /** On the register, but can't be paid until reactivated. */
+    SUSPENDED,
+    DEACTIVATED,
+    UNKNOWN,
+}
+
+/** The business's join code: workers type it, or scan [link] as a QR code, to ask to join. */
+data class JoinCode(val enabled: Boolean, val code: String?, val link: String?)
+
+/** A business the user works for (or is invited to, or asked to join), as the worker sees it. */
+data class Employer(
+    val id: String,
+    val business: String,
+    val jobTitle: String,
+    val status: WorkerStatus,
+    val statusLabel: String,
+)
+
+/** Who an invitation code is from, shown before the worker accepts it. */
+data class InvitationPreview(val business: String, val name: String, val jobTitle: String)
 
 data class WorkerImportResult(val created: Int, val updated: Int, val errors: List<String>)
 

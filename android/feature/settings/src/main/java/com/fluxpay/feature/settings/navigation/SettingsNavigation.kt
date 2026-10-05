@@ -8,6 +8,6 @@ object SettingsRoutes {
     const val SETTINGS = "settings"
 }
 
-fun NavGraphBuilder.settingsScreen() {
-    composable(SettingsRoutes.SETTINGS) { SettingsScreen() }
+fun NavGraphBuilder.settingsScreen(onOpenEmployers: () -> Unit) {
+    composable(SettingsRoutes.SETTINGS) { SettingsScreen(onOpenEmployers = onOpenEmployers) }
 }
