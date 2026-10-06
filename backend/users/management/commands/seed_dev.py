@@ -1,4 +1,4 @@
-"""Development data: 5 businesses, each with an owner and 20 workers, every login with the same password.
+"""Development data: 5 businesses, each with an owner, a finance member and 20 workers, every login with the same password.
 
     python manage.py seed_dev --reset            # wipe the database first (asks to confirm)
     python manage.py seed_dev --reset --yes      # ... without asking
@@ -119,9 +119,15 @@ class Command(BaseCommand):
                                 reason=f"Opening funds ({receipt.number})", cashbook_entry=receipt)  # fmt: skip
 
             membership = Membership.objects.select_related("organization", "user").get(organization=organization, user=owner)
+            # A finance member prepares pay runs and payments; the owner approves them.
+            finance = person(f"finance@{domain}", f"{owner_name.split()[-1]} Finance", f"0{phone}")
+            phone += 1
+            open_wallet(finance, currency="KES")
+            Membership.objects.create(organization=organization, user=finance, role=Membership.Role.FINANCE,
+                                      invited_by=owner)  # fmt: skip
             for i in range(1, WORKERS_PER_BUSINESS + 1):
                 full_name = f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"
-                user = person(f"worker{i:02d}@{domain}", full_name, f"0{phone}")
+                user = person(f"worker{i:03d}@{domain}", full_name, f"0{phone}")
                 phone += 1
                 wallet = open_wallet(user, currency="KES")
                 job, base = random.choice(JOBS)
@@ -132,7 +138,7 @@ class Command(BaseCommand):
                 )  # fmt: skip
                 workers.accept_invitation(user=user, code=code)
             cashbook.refresh_from_db()
-            summary.append((name, f"owner@{domain}", f"worker01..worker{WORKERS_PER_BUSINESS:02d}@{domain}", cashbook))
+            summary.append((name, f"owner@{domain}", f"worker001..worker{WORKERS_PER_BUSINESS:03d}@{domain}", cashbook))
 
         Currency.objects.filter(code="KES").update(max_transfer=limit)
         return summary
@@ -141,5 +147,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nReady. Every login's password: {PASSWORD}\n"))
         self.stdout.write("  Staff (back office): admin@fluxpay.dev")
         for name, owner, staff_range, cashbook in summary:
-            self.stdout.write(f"  {name:<22} owner: {owner:<34} workers: {staff_range}")
+            finance = owner.replace("owner@", "finance@")
+            self.stdout.write(f"  {name:<22} owner: {owner:<34} finance: {finance:<36} workers: {staff_range}")
             self.stdout.write(f"  {'':<22} cashbook {cashbook.account_number}: KES {cashbook.balance:,.2f}")

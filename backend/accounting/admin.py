@@ -244,7 +244,8 @@ class BankAccountAdmin(ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         if change:
-            super().save_model(request, obj, form, change)
+            changes = {name: form.cleaned_data[name] for name in form.changed_data if name in form.cleaned_data}
+            services.update_bank_account(staff=request.user, bank=obj, **changes)
             return
         fields = {name: form.cleaned_data[name] for name in form.Meta.fields}
         bank = services.open_bank_account(**fields)

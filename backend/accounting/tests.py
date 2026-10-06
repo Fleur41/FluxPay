@@ -87,6 +87,17 @@ class BooksTestCase(TestCase):
         self.assertEqual(reports.safeguarding(currency)["subledger_difference"], 0)
 
 
+class BankAccountEditTests(BooksTestCase):
+    def test_renaming_a_bank_account_renames_it_in_the_books_and_is_audited(self):
+        from audit.models import AuditEvent
+
+        services.update_bank_account(staff=self.staff, bank=self.safe, name="KCB – customer funds", branch="Ruiru")
+        self.safe.refresh_from_db()
+        self.assertEqual((self.safe.ledger_account.name, self.safe.branch), ("KCB – customer funds", "Ruiru"))
+        event = AuditEvent.objects.get(action="bank_account.changed")
+        self.assertEqual(event.metadata["before"]["name"], "Equity – customer funds")
+
+
 class ChartAndNumberingTests(BooksTestCase):
     def test_bank_accounts_get_their_own_ledger_accounts(self):
         self.assertEqual((self.safe.ledger_account.code, self.operating.ledger_account.code), ("1010", "1011"))
