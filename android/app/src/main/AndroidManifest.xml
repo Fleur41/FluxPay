@@ -50,6 +50,22 @@
                 <data android:scheme="fluxpay" android:host="transaction" />
             </intent-filter>
 
+            <!-- fluxpay://join-employer?code=… (worker invitation SMS/email) or ?business=… (a business's QR code) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fluxpay" android:host="join-employer" />
+            </intent-filter>
+
+            <!-- fluxpay://join-business?token=… (invitation to a business's team: admin, finance, viewer) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fluxpay" android:host="join-business" />
+            </intent-filter>
+
             <!-- fluxpay://reset-password?uid=…&token=… (from the password reset email) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

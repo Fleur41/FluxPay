@@ -1,6 +1,7 @@
 package com.fluxpay.feature.auth
 
 import com.fluxpay.core.common.result.NetworkResult
+import com.fluxpay.core.domain.model.LoginResult
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.repository.AuthRepository
 import com.fluxpay.feature.auth.domain.usecase.LoginUseCase
@@ -20,6 +21,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -64,11 +66,46 @@ class LoginViewModelTest {
 
     @Test
     fun `success clears password`() = runTest(dispatcher) {
-        coEvery { repository.login(any(), any()) } returns NetworkResult.Success(User("1", "a@b.co", "A B", ""))
+        coEvery { repository.login(any(), any()) } returns
+            NetworkResult.Success(LoginResult.SignedIn(User("1", "a@b.co", "A B", "")))
         viewModel.onEmailChange("a@b.co")
         viewModel.onPasswordChange("FluxPay#2026")
         viewModel.submit()
         advanceUntilIdle()
         assertEquals("", viewModel.state.value.password)
+        assertNull(viewModel.state.value.mfaToken)
+    }
+
+    @Test
+    fun `with two-step verification on, a code completes the sign in`() = runTest(dispatcher) {
+        coEvery { repository.login(any(), any()) } returns NetworkResult.Success(LoginResult.NeedsCode("challenge"))
+        coEvery { repository.completeLogin("challenge", "123456") } returns
+            NetworkResult.Success(User("1", "a@b.co", "A B", ""))
+        viewModel.onEmailChange("a@b.co")
+        viewModel.onPasswordChange("FluxPay#2026")
+        viewModel.submit()
+        advanceUntilIdle()
+        assertEquals("challenge", viewModel.state.value.mfaToken)
+        viewModel.onCodeChange("123456")
+        viewModel.submitCode()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.mfaToken)
+        coVerify(exactly = 1) { repository.completeLogin("challenge", "123456") }
+    }
+
+    @Test
+    fun `an expired challenge goes back to the password`() = runTest(dispatcher) {
+        coEvery { repository.login(any(), any()) } returns NetworkResult.Success(LoginResult.NeedsCode("old"))
+        coEvery { repository.completeLogin(any(), any()) } returns
+            NetworkResult.Error("Your sign-in expired. Enter your password again.", code = "mfa_challenge_expired", httpStatus = 401)
+        viewModel.onEmailChange("a@b.co")
+        viewModel.onPasswordChange("FluxPay#2026")
+        viewModel.submit()
+        advanceUntilIdle()
+        viewModel.onCodeChange("123456")
+        viewModel.submitCode()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.mfaToken)
+        assertEquals("Your sign-in expired. Enter your password again.", viewModel.state.value.errorMessage)
     }
 }

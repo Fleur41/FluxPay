@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{% block title %}FluxPay{% endblock %}</title>
+<style>
+  :root { --bg: #f6f5fb; --card: #ffffff; --text: #1c1b22; --muted: #5d5b6a; --primary: #5b3fd6; --on-primary: #ffffff;
+          --border: #e3e0ef; --error: #b3261e; --ok: #1e7a46; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14131a; --card: #1e1d26; --text: #ecebf3; --muted: #a9a6b8; --primary: #b4a3ff; --on-primary: #1f1060;
+            --border: #34323f; --error: #f2b8b5; --ok: #7fd6a2; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 440px; margin: 0 auto; padding: 32px 16px; }
+  .logo { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #3b2bb8, #1f8a8a);
+          color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 20px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p, li { color: var(--muted); }
+  ol { padding-left: 20px; }
+  label { display: block; font-weight: 600; margin: 16px 0 6px; }
+  input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: transparent;
+          color: var(--text); font-size: 16px; }
+  .button { display: block; width: 100%; text-align: center; padding: 14px; margin-top: 20px; border-radius: 12px; border: 0;
+            background: var(--primary); color: var(--on-primary); font-weight: 600; font-size: 16px; text-decoration: none; cursor: pointer; }
+  .button.secondary { background: transparent; color: var(--primary); border: 1px solid var(--border); }
+  .code { font: 700 30px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 2px; text-align: center; padding: 16px;
+          border: 1px dashed var(--border); border-radius: 12px; margin: 16px 0; color: var(--text); user-select: all; }
+  .error { color: var(--error); margin: 12px 0 0; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .small { font-size: 13px; }
+</style>
+</head>
+<body><main><div class="logo">F</div><div class="card">{% block content %}{% endblock %}</div></main></body>
+</html>

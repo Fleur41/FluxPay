@@ -33,9 +33,14 @@ CHART = {
     "capital": ("3000", "Owner's capital", T.EQUITY, "Money the owners put into the business."),
     "drawings": ("3100", "Owner's drawings", T.EQUITY, "Money the owners took out of the business."),
     "sales": ("4000", "Sales and revenue", T.INCOME, "Money customers paid the business."),
+    "interest_income": ("4800", "Interest earned", T.INCOME, "Interest paid to the business, e.g. on savings."),
     "other_income": ("4900", "Other income", T.INCOME, ""),
     "salaries": ("5000", "Salaries and wages", T.EXPENSE, "Pay to workers, through FluxPay payroll."),
+    "allowances": ("5001", "Allowances", T.EXPENSE, "Transport, housing and other allowances paid to workers."),
+    "bonuses": ("5002", "Bonuses", T.EXPENSE, "Bonuses paid to workers."),
+    "commissions": ("5003", "Commissions", T.EXPENSE, "Commissions paid to workers."),
     "suppliers": ("5100", "Purchases and suppliers", T.EXPENSE, "Stock, materials and supplier payments."),
+    "contractors": ("5101", "Contractors", T.EXPENSE, "Payments to contractors and freelancers."),
     "expenses": ("5900", "Other business expenses", T.EXPENSE, "Rent, transport, utilities and other costs."),
 }
 # What a movement is booked to unless someone chooses otherwise.
@@ -181,6 +186,31 @@ def on_transfer(transfer, source, destination, *, out_role: str | None = None) -
         )  # fmt: skip
 
 
+def on_payment_reversal(reversal, *, payer, payee, payer_role: str, source: str = Source.REVERSAL) -> None:
+    """Books a business taking back one of its payments (`reversal.reverses`).
+
+    Each business side is booked against the category its original entry is filed under now, so the
+    expense (or, for a business payee, the income) shrinks. `payer_role` is used if the payment was never
+    booked on its own line (pay runs paid before payslips had their own lines)."""
+    from banking.services import holder_name
+
+    original = reversal.reverses.reference
+    for wallet, direction, other in ((payer, "IN", payee), (payee, "OUT", payer)):
+        if not wallet.organization_id:
+            continue
+        booked = (
+            BusinessEntry.objects.filter(wallet=wallet, reference=original).exclude(direction=direction)
+            .select_related("category").first()
+        )
+        fallback = payer_role if wallet is payer else _incoming_role(wallet.organization_id, other)
+        record_movement(
+            wallet=wallet, direction=direction, amount=reversal.amount, source=source, reference=reversal.reference,
+            counterparty=holder_name(other), counterparty_account=other.account_number, description=reversal.note,
+            role=None if booked else fallback, category_account=booked.category if booked else None,
+            actor=reversal.initiated_by,
+        )  # fmt: skip
+
+
 def _incoming_role(organization_id, source) -> str:
     """Money from one of the business's owners is capital; from anyone else it is taken as a sale."""
     from organizations.models import Membership
@@ -237,7 +267,10 @@ def reclassify(*, entry: BusinessEntry, new_category: LedgerAccount, actor, note
         if old.pk == new_category.pk:
             return entry
         if old.is_control:
-            raise BusinessError("Moves between your own wallets can't be re-filed.", "cannot_reclassify")
+            raise BusinessError(
+                "This entry pays a bill or invoice, or moves money between your own wallets, so it can't be re-filed.",
+                "cannot_reclassify",
+            )
         memo = f"Re-filed {entry.reference or 'entry'} from {old.name} to {new_category.name}"
         # Money in sits as a credit on its category, money out as a debit: move that balance across.
         lines = [(old, entry.amount, 0, memo), (new_category, 0, entry.amount, memo)]

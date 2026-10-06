@@ -2,7 +2,7 @@ from django.contrib import admin
 from unfold.contrib.filters.admin import RangeDateFilter
 from unfold.decorators import display
 
-from fluxpay.admin_base import ViewOnlyAdmin
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin
 
 from .models import AuditEvent
 
@@ -19,6 +19,7 @@ class AreaFilter(admin.SimpleListFilter):
             ("transfer.", "Transfers"),
             ("adjustment.", "Staff top-ups & corrections"),
             ("org.", "Businesses"),
+            ("books.", "Business books"),
             ("payment.", "External payments"),
             ("statement.", "Statements"),
             ("config.", "Platform settings"),
@@ -28,17 +29,47 @@ class AreaFilter(admin.SimpleListFilter):
         return queryset.filter(action__startswith=self.value()) if self.value() else queryset
 
 
+class BusinessFilter(admin.SimpleListFilter):
+    """One business's log: everything its members, its workers' payroll and FluxPay staff did to it."""
+
+    title = "business"
+    parameter_name = "organization"
+
+    def lookups(self, request, model_admin):
+        from organizations.models import Organization
+
+        return [(str(pk), name) for pk, name in Organization.objects.order_by("name").values_list("pk", "name")]
+
+    def queryset(self, request, queryset):
+        return queryset.filter(organization_id=self.value()) if self.value() else queryset
+
+
 @admin.register(AuditEvent)
-class AuditEventAdmin(ViewOnlyAdmin):
+class AuditEventAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """Append-only and hash-chained: `manage.py verify_audit_log` detects any edit or deletion."""
 
-    list_display = ("created_at", "action_label", "actor_label", "target_type", "target_id", "ip_address")
-    list_filter = (AreaFilter, "action", ("created_at", RangeDateFilter))
+    list_display = ("created_at", "action_label", "actor_label", "business", "target_type", "target_id", "ip_address")
+    list_filter = (BusinessFilter, AreaFilter, "action", ("created_at", RangeDateFilter))
     list_filter_submit = True
     search_fields = ("actor_label", "action", "target_id", "ip_address")
     search_help_text = "Search by who did it (email), action, record id or IP address"
     date_hierarchy = "created_at"
     exclude = ("prev_hash",)
+
+    @display(description="Business")
+    def business(self, event):
+        if not event.organization_id:
+            return "-"
+        from organizations.models import Organization
+
+        names = getattr(self, "_business_names", None)
+        if names is None:
+            names = self._business_names = dict(Organization.objects.values_list("pk", "name"))
+        return names.get(event.organization_id, "-")
+
+    def changelist_view(self, request, extra_context=None):
+        self._business_names = None  # fresh names for each page
+        return super().changelist_view(request, extra_context)
 
     @display(
         description="Action",

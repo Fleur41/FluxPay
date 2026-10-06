@@ -1,21 +1,35 @@
 from django.contrib.auth import get_user_model, password_validation
+from django.contrib.auth.models import update_last_login
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenObtainSerializer,
+)
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 
 from audit.services import record
 from fluxpay.exceptions import BusinessError
 from platform_settings import services as rules
 
+from . import mfa
+
 User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
+    mfa_enabled = serializers.BooleanField(read_only=True)
+    # Owners and admins of a business (and staff) need two-step verification to act; the app nudges them.
+    mfa_required = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ("id", "email", "full_name", "phone_number", "date_joined")
+        fields = ("id", "email", "full_name", "phone_number", "date_joined", "mfa_enabled", "mfa_required")
         read_only_fields = ("id", "email", "date_joined")
+
+    def get_mfa_required(self, user) -> bool:
+        return mfa.is_required(user)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -53,15 +67,39 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
-class FluxPayTokenSerializer(TokenObtainPairSerializer):
-    """Login response also carries the user profile to save a round-trip."""
+def tokens_for(user) -> dict:
+    """The JWT pair and profile the app receives once the user is fully signed in."""
+    refresh = TokenObtainPairSerializer.get_token(user)
+    if jwt_settings.UPDATE_LAST_LOGIN:
+        update_last_login(None, user)
+    record("auth.login", actor=user)
+    return {"refresh": str(refresh), "access": str(refresh.access_token), "user": UserSerializer(user).data}
+
+
+class FluxPayTokenSerializer(TokenObtainSerializer):
+    """Email and password. With two-step verification on, the answer is a challenge instead of tokens:
+    `{"mfa_required": true, "mfa_token": ...}`, exchanged with a code at auth/login/mfa/."""
 
     def validate(self, attrs):
         attrs[self.username_field] = attrs[self.username_field].lower()
-        data = super().validate(attrs)
-        data["user"] = UserSerializer(self.user).data
-        record("auth.login", actor=self.user)
-        return data
+        super().validate(attrs)  # checks the password; sets self.user
+        if self.user.mfa_enabled:
+            record("auth.login_password_ok", actor=self.user)
+            return {"mfa_required": True, "mfa_token": mfa.challenge_for(self.user)}
+        return tokens_for(self.user)
+
+
+class MfaLoginSerializer(serializers.Serializer):
+    mfa_token = serializers.CharField(max_length=500)
+    code = serializers.CharField(max_length=20)
+
+
+class MfaCodeSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=20)
+
+
+class MfaDisableSerializer(MfaCodeSerializer):
+    password = serializers.CharField(trim_whitespace=False)
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):

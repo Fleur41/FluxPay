@@ -46,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.fluxpay.core.common.util.initials
 
@@ -60,7 +61,9 @@ fun FluxPrimaryButton(
     Button(
         onClick = onClick,
         enabled = enabled && !loading,
-        modifier = modifier.fillMaxWidth().height(54.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(54.dp),
         shape = MaterialTheme.shapes.medium,
     ) {
         if (loading) {
@@ -80,7 +83,9 @@ fun FluxSecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = 
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().height(54.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(54.dp),
         shape = MaterialTheme.shapes.medium,
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
@@ -194,12 +199,17 @@ fun EmptyState(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(32.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
-            modifier = Modifier.size(64.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -218,6 +228,7 @@ fun EmptyState(
 fun FullScreenLoading(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 }
+
 
 @Composable
 fun Avatar(name: String, modifier: Modifier = Modifier, size: Int = 44, container: Color? = null) {

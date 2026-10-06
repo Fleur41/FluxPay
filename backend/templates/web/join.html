@@ -1,0 +1,14 @@
+{% extends "web/_base.html" %}
+{% block title %}Your invitation · FluxPay{% endblock %}
+{% block content %}
+  <h1>You're invited to get paid through FluxPay</h1>
+  <p>Your invitation code:</p>
+  <div class="code">{{ code|default:"—" }}</div>
+  <a class="button" href="{{ app_link }}">Open in the FluxPay app</a>
+  <p class="small" style="margin-top:20px">If the button doesn't open the app:</p>
+  <ol class="small">
+    <li>Install the FluxPay app and sign in, or create your account.</li>
+    <li>On Home, tap <strong>Do you work for a business?</strong> (or Settings → My employers → Join a business).</li>
+    <li>Type the code above and tap <strong>Accept</strong>.</li>
+  </ol>
+{% endblock %}

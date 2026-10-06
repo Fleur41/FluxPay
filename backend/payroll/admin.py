@@ -4,19 +4,22 @@ from unfold.admin import TabularInline
 from unfold.contrib.filters.admin import RangeDateFilter
 from unfold.decorators import display
 
-from fluxpay.admin_base import ViewOnlyAdmin, admin_link, money
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin, admin_link, money
+from organizations.models import Payment
 
-from .models import PayRun, Payslip, Worker
+from .models import PayRun, Worker
 
 
 @admin.register(Worker)
-class WorkerAdmin(ViewOnlyAdmin):
+class WorkerAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """Businesses manage their own workers in the app; staff can look them up here."""
 
-    list_display = ("name", "business", "wallet_link", "job_title", "salary_display", "is_active", "created_at")
-    list_filter = ("is_active", "organization")
-    search_fields = ("wallet__owner__full_name", "wallet__account_number", "employee_number", "organization__name")
-    search_help_text = "Search by worker name, wallet number, employee number or business"
+    list_display = ("name", "business", "wallet_link", "job_title", "salary_display", "status_label", "created_at")
+    list_filter = ("status", "organization")
+    search_fields = ("full_name", "wallet__owner__full_name", "wallet__account_number", "phone_number",
+                     "employee_number", "organization__name")  # fmt: skip
+    search_help_text = "Search by worker name, wallet number, phone, employee number or business"
+    exclude = ("invite_code_hash",)
     list_select_related = ("wallet__owner", "organization")
 
     @display(description="Worker", ordering="wallet__owner__full_name")
@@ -29,18 +32,29 @@ class WorkerAdmin(ViewOnlyAdmin):
 
     @display(description="Wallet")
     def wallet_link(self, worker):
+        if not worker.wallet_id:
+            return "-"
         return admin_link("admin:banking_account_change", worker.wallet_id, worker.wallet.account_number)
 
     @display(description="Salary", ordering="salary")
     def salary_display(self, worker):
-        return money(worker.salary, worker.wallet.currency)
+        return money(worker.salary, worker.wallet.currency if worker.wallet_id else "")
+
+    @display(
+        description="Status",
+        label={"ACTIVE": "success", "INVITED": "info", "PENDING_ACTIVATION": "warning", "SUSPENDED": "warning",
+               "DEACTIVATED": ""},
+    )  # fmt: skip
+    def status_label(self, worker):
+        return worker.status, worker.get_status_display()
 
 
 class PayslipInline(TabularInline):
-    model = Payslip
+    model = Payment
+    fk_name = "pay_run"
     extra = 0
     can_delete = False
-    fields = ("worker_name", "account", "amount", "status_label", "reference", "reversal_reason")
+    fields = ("worker_name", "account", "type", "amount", "status_label", "reference", "reversal_reason")
     readonly_fields = fields
     verbose_name_plural = "Payslips"
     per_page = 50
@@ -49,7 +63,7 @@ class PayslipInline(TabularInline):
         return False
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("worker__wallet__owner", "transfer")
+        return super().get_queryset(request).select_related("worker__wallet__owner")
 
     @display(description="Worker")
     def worker_name(self, payslip):
@@ -59,17 +73,16 @@ class PayslipInline(TabularInline):
     def account(self, payslip):
         return payslip.worker.wallet.account_number
 
-    @display(description="Status", label={"PAID": "success", "PENDING": "info", "REVERSED": "danger"})
+    @display(
+        description="Status",
+        label={"COMPLETED": "success", "PENDING": "info", "REVERSED": "danger", "CANCELLED": "", "REJECTED": ""},
+    )
     def status_label(self, payslip):
         return payslip.status, payslip.get_status_display()
 
-    @display(description="Reference")
-    def reference(self, payslip):
-        return payslip.transfer.reference if payslip.transfer_id else "-"
-
 
 @admin.register(PayRun)
-class PayRunAdmin(ViewOnlyAdmin):
+class PayRunAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = ("title", "business", "pay_date", "status_label", "workers", "total_display", "reversed",
                     "paid_at")  # fmt: skip
     list_filter = ("status", "organization", ("pay_date", RangeDateFilter))

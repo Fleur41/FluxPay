@@ -10,13 +10,17 @@ from banking.filters import TransactionFilter
 from banking.models import Account, Transaction
 from banking.serializers import AccountSerializer, TransactionSerializer
 from banking.views import statement_response
+from payments.models import ExternalPayment
+from payments.serializers import ExternalPaymentSerializer, MpesaAmountSerializer
 
-from . import services
-from .models import Invitation, Membership, PaymentRequest
-from .roles import Perm
+from . import beneficiaries, services
+from .models import Beneficiary, Invitation, Membership, Payment
+from .roles import Perm, has_perm
 from .serializers import (
     AcceptInvitationSerializer,
     AuditEventSerializer,
+    BeneficiarySerializer,
+    BeneficiaryWriteSerializer,
     DecisionSerializer,
     InvitationCreateSerializer,
     InvitationSerializer,
@@ -24,8 +28,9 @@ from .serializers import (
     OrganizationCreateSerializer,
     OrganizationSerializer,
     OrganizationUpdateSerializer,
-    PaymentRequestCreateSerializer,
-    PaymentRequestSerializer,
+    PaymentCreateSerializer,
+    PaymentSerializer,
+    ReverseSerializer,
     RoleSerializer,
 )
 
@@ -162,8 +167,14 @@ class OrgTransactionListView(OrgScopedMixin, generics.ListAPIView):
         )
 
 
-class PaymentRequestListCreateView(OrgScopedMixin, generics.ListAPIView):
-    serializer_class = PaymentRequestSerializer
+class PaymentListCreateView(OrgScopedMixin, generics.ListAPIView):
+    """GET/POST /organizations/<id>/payments/ — every payment out of the cashbook, pay-run payslips included.
+
+    Filters: ?status=, ?type=, ?worker=<worker id>, ?beneficiary=<id>, ?pay_run=<run id> or ?pay_run=none for
+    payments made on their own.
+    """
+
+    serializer_class = PaymentSerializer
     throttle_classes = (ScopedRateThrottle,)
     throttle_scope = "transfers"
 
@@ -171,42 +182,168 @@ class PaymentRequestListCreateView(OrgScopedMixin, generics.ListAPIView):
         return Perm.INITIATE_PAYMENT if request.method == "POST" else Perm.VIEW
 
     def get_queryset(self):
-        requests = PaymentRequest.objects.select_related(
-            "source_account", "created_by", "decided_by", "transfer"
+        payments = Payment.objects.select_related(
+            "source_account", "created_by", "decided_by", "reversal", "external_payment"
         ).filter(organization_id=self.membership.organization_id)
-        wanted = self.request.query_params.get("status")
-        return requests.filter(status=wanted) if wanted else requests
+        params = self.request.query_params
+        for field in ("status", "type"):
+            if params.get(field):
+                payments = payments.filter(**{field: params[field]})
+        if params.get("worker"):
+            payments = payments.filter(worker_id=params["worker"])
+        if params.get("beneficiary"):
+            payments = payments.filter(beneficiary_id=params["beneficiary"])
+        if params.get("pay_run") == "none":
+            payments = payments.filter(pay_run__isnull=True)
+        elif params.get("pay_run"):
+            payments = payments.filter(pay_run_id=params["pay_run"])
+        return payments
 
     def post(self, request, org_id):
-        serializer = PaymentRequestCreateSerializer(data=request.data)
+        serializer = PaymentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        payment, created = services.create_payment_request(membership=self.membership, **serializer.validated_data)
+        payment, created = services.create_payment(membership=self.membership, **serializer.validated_data)
         return Response(
-            PaymentRequestSerializer(payment).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            PaymentSerializer(payment).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
         )
 
 
-class PaymentRequestDecisionView(OrgScopedMixin, APIView):
-    """POST .../payment-requests/<id>/{approve,reject,cancel}/"""
+class PaymentActionView(OrgScopedMixin, APIView):
+    """POST .../payments/<id>/{approve,reject,cancel,reverse}/"""
 
     actions = {
-        "approve": (Perm.APPROVE_PAYMENT, services.approve_payment_request),
-        "reject": (Perm.APPROVE_PAYMENT, services.reject_payment_request),
-        "cancel": (Perm.INITIATE_PAYMENT, services.cancel_payment_request),
+        "approve": Perm.APPROVE_PAYMENT,
+        "reject": Perm.APPROVE_PAYMENT,
+        "cancel": Perm.INITIATE_PAYMENT,
+        "reverse": Perm.APPROVE_PAYMENT,
     }
 
     def perm_for(self, request):
-        if self.kwargs["decision"] not in self.actions:
+        if self.kwargs["action"] not in self.actions:
             raise Http404
-        return self.actions[self.kwargs["decision"]][0]
+        return self.actions[self.kwargs["action"]]
 
-    def post(self, request, org_id, request_id, decision):
+    def post(self, request, org_id, payment_id, action):
+        if action == "reverse":
+            serializer = ReverseSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            payment = services.reverse_payment(
+                membership=self.membership, payment_id=payment_id, reason=serializer.validated_data["reason"]
+            )
+            return Response(PaymentSerializer(payment).data)
         serializer = DecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        _perm, action = self.actions[decision]
-        kwargs = {"note": serializer.validated_data["note"]} if decision != "cancel" else {}
-        payment = action(membership=self.membership, request_id=request_id, **kwargs)
-        return Response(PaymentRequestSerializer(payment).data)
+        if action == "cancel":
+            payment = services.cancel_payment(membership=self.membership, payment_id=payment_id)
+        else:
+            decide = services.approve_payment if action == "approve" else services.reject_payment
+            payment = decide(membership=self.membership, payment_id=payment_id, note=serializer.validated_data["note"])
+        return Response(PaymentSerializer(payment).data)
+
+
+class MpesaDepositView(OrgScopedMixin, APIView):
+    """POST /organizations/<id>/deposits/mpesa/ — an STK Push to `phone_number`; the cashbook is credited once
+    M-Pesa confirms. Answers 202; follow it at .../external-payments/<id>/."""
+
+    perm = Perm.INITIATE_PAYMENT
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "deposits"
+
+    def post(self, request, org_id):
+        serializer = MpesaAmountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payment, created = services.deposit_by_mpesa(membership=self.membership, **serializer.validated_data)
+        payment.refresh_from_db()  # the submit may already have run (inline mode)
+        return Response(
+            ExternalPaymentSerializer(payment).data, status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
+        )
+
+
+class ExternalPaymentListView(OrgScopedMixin, generics.ListAPIView):
+    """GET /organizations/<id>/external-payments/ — money in and out of the cashbook by M-Pesa or bank."""
+
+    serializer_class = ExternalPaymentSerializer
+    filterset_fields = ("rail", "direction", "status")
+
+    def get_queryset(self):
+        return ExternalPayment.objects.select_related("account").filter(
+            account__organization_id=self.membership.organization_id
+        )
+
+
+class ExternalPaymentDetailView(OrgScopedMixin, generics.RetrieveAPIView):
+    serializer_class = ExternalPaymentSerializer
+    lookup_url_kwarg = "payment_id"
+
+    def get_queryset(self):
+        return ExternalPayment.objects.select_related("account").filter(
+            account__organization_id=self.membership.organization_id
+        )
+
+
+class BeneficiaryMixin(OrgScopedMixin):
+    def perm_for(self, request):
+        return Perm.VIEW if request.method == "GET" else Perm.MANAGE_BENEFICIARIES
+
+    def respond(self, beneficiary, status_code=status.HTTP_200_OK):
+        full = has_perm(self.membership.role, Perm.MANAGE_BENEFICIARIES)
+        return Response(BeneficiarySerializer(beneficiary, context={"full_details": full}).data, status=status_code)
+
+
+class BeneficiaryListCreateView(BeneficiaryMixin, generics.ListAPIView):
+    """GET/POST /organizations/<id>/beneficiaries/ — ?search=, ?kind=, ?active=all to include archived ones."""
+
+    serializer_class = BeneficiarySerializer
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(),
+                "full_details": has_perm(self.membership.role, Perm.MANAGE_BENEFICIARIES)}  # fmt: skip
+
+    def get_queryset(self):
+        found = Beneficiary.objects.select_related("verified_by", "details_changed_by").filter(
+            organization_id=self.membership.organization_id
+        )
+        params = self.request.query_params
+        if params.get("active", "true") != "all":
+            found = found.filter(is_active=True)
+        if params.get("kind"):
+            found = found.filter(kind=params["kind"])
+        if search := params.get("search", "").strip():
+            found = found.filter(name__icontains=search)
+        return found
+
+    def post(self, request, org_id):
+        serializer = BeneficiaryWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        beneficiary = beneficiaries.add(membership=self.membership, **serializer.validated_data)
+        return self.respond(beneficiary, status.HTTP_201_CREATED)
+
+
+class BeneficiaryDetailView(BeneficiaryMixin, APIView):
+    def get(self, request, org_id, beneficiary_id):
+        return self.respond(beneficiaries.get(self.membership, beneficiary_id))
+
+    def patch(self, request, org_id, beneficiary_id):
+        serializer = BeneficiaryWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        beneficiary = beneficiaries.update(
+            membership=self.membership, beneficiary_id=beneficiary_id, **serializer.validated_data
+        )
+        return self.respond(beneficiary)
+
+    def delete(self, request, org_id, beneficiary_id):
+        """Archives: past payments keep pointing at it."""
+        return self.respond(beneficiaries.archive(membership=self.membership, beneficiary_id=beneficiary_id))
+
+
+class BeneficiaryVerifyView(BeneficiaryMixin, APIView):
+    """POST .../beneficiaries/<id>/verify/ — an owner or admin confirms the payout details."""
+
+    def perm_for(self, request):
+        return Perm.APPROVE_PAYMENT
+
+    def post(self, request, org_id, beneficiary_id):
+        return self.respond(beneficiaries.verify(membership=self.membership, beneficiary_id=beneficiary_id))
 
 
 class OrgAuditEventListView(OrgScopedMixin, generics.ListAPIView):

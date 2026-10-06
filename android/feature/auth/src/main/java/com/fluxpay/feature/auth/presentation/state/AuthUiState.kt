@@ -9,6 +9,9 @@ data class LoginUiState(
     val errors: FieldErrors = FieldErrors(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
+    /** Set once the password was right and two-step verification is on: the code step is showing. */
+    val mfaToken: String? = null,
+    val code: String = "",
 )
 
 data class RegisterUiState(

@@ -209,14 +209,17 @@ def transfer_funds(*, user, source_id, destination_number: str, amount: Decimal,
 
 
 def transfer_from_organization(*, initiator, organization, source_id, destination_number: str, amount: Decimal,
-                               note: str, idempotency_key: str, books_role: str | None = None):
+                               note: str, idempotency_key: str, books_role: str | None = None,
+                               reference: str | None = None):
     """Moves money from a business wallet. The caller (organizations.services) has already checked the
     member's permission and any approval; this only confirms the wallet belongs to the organization.
 
     `books_role` files the payment in the business's books ("suppliers", "salaries", ...); BOOKED_BY_CALLER
-    means the caller books it itself (payroll books a whole pay run as one cashbook line)."""
+    means the caller books it itself (payroll books each payslip as a payroll line) and the sender isn't
+    alerted. `reference` is the business payment's own, so both share it."""
     return _transfer(
         books_role=books_role,
+        reference=reference,
         initiator=initiator,
         may_spend=lambda source: source.organization_id == organization.id,
         source_id=source_id,
@@ -233,7 +236,7 @@ def holder_name(account: Account) -> str:
 
 
 def _transfer(*, initiator, may_spend, source_id, destination_number: str, amount: Decimal, note: str,
-              idempotency_key: str, books_role: str | None = None):
+              idempotency_key: str, books_role: str | None = None, reference: str | None = None):
     existing = Transfer.objects.filter(initiated_by=initiator, idempotency_key=idempotency_key).first()
     if existing:
         return existing, _debit_for(existing), False
@@ -264,7 +267,7 @@ def _transfer(*, initiator, may_spend, source_id, destination_number: str, amoun
             if source.balance < amount:
                 raise BusinessError("Insufficient funds for this transfer.", "insufficient_funds")
 
-            reference = new_reference()
+            reference = reference or new_reference()
             source.balance -= amount
             destination.balance += amount
             source.save(update_fields=["balance", "updated_at"])

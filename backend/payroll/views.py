@@ -2,36 +2,50 @@
 
 from datetime import date as Date
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils.dateparse import parse_date
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounting import business as books
-from accounting import reports
-from accounting.models import BusinessEntry, LedgerAccount
+from accounting import invoices, reports
+from accounting.business_reconciliation import reconcile as reconcile_business
+from accounting.models import BusinessEntry, Invoice, LedgerAccount
 from accounting.services import business_date
 from banking.models import Account
 from fluxpay.exceptions import BusinessError
+from organizations.models import Payment
 from organizations.roles import Perm
 from organizations.serializers import DecisionSerializer
 from organizations.views import OrgScopedMixin
 
 from . import services
-from .models import PayRun, Payslip, Worker
+from . import workers as register
+from .models import PayRun, Worker
 from .serializers import (
     BookEntrySerializer,
     CategoryCreateSerializer,
     CategorySerializer,
+    CodeSerializer,
+    EmployerSerializer,
+    InvoiceCancelSerializer,
+    InvoiceCreateSerializer,
+    InvoicePaySerializer,
+    InvoiceSerializer,
     MyPayslipSerializer,
     PayRunCreateSerializer,
     PayRunDetailSerializer,
     PayRunSerializer,
+    PayslipCreateSerializer,
+    PayslipSerializer,
     PayslipUpdateSerializer,
     ReclassifySerializer,
     ReverseSerializer,
+    WorkerActionSerializer,
     WorkerCreateSerializer,
     WorkerImportSerializer,
     WorkerSerializer,
@@ -49,17 +63,30 @@ class WritesNeedPayments(OrgScopedMixin):
 # --- Workers ------------------------------------------------------------------------------------
 
 
-class WorkerListCreateView(WritesNeedPayments, generics.ListAPIView):
+class WorkersNeedManage(OrgScopedMixin):
+    def perm_for(self, request):
+        return Perm.VIEW if request.method == "GET" else Perm.MANAGE_WORKERS
+
+
+class WorkerListCreateView(WorkersNeedManage, generics.ListAPIView):
+    """GET: active workers by default; ?status=INVITED|PENDING_ACTIVATION|SUSPENDED|DEACTIVATED, or ?active=all.
+    POST: invites a worker (they join once they accept)."""
+
     serializer_class = WorkerSerializer
 
     def get_queryset(self):
         workers = Worker.objects.select_related("wallet__owner").filter(organization_id=self.membership.organization_id)
-        if self.request.query_params.get("active", "true") != "all":
-            workers = workers.filter(is_active=True)
-        if search := self.request.query_params.get("search", "").strip():
+        params = self.request.query_params
+        if params.get("status"):
+            workers = workers.filter(status=params["status"])
+        elif params.get("active", "true") != "all":
+            workers = workers.filter(status=Worker.Status.ACTIVE)
+        if search := params.get("search", "").strip():
             workers = workers.filter(
-                Q(wallet__owner__full_name__icontains=search)
+                Q(full_name__icontains=search)
+                | Q(wallet__owner__full_name__icontains=search)
                 | Q(wallet__account_number__startswith=search)
+                | Q(phone_number__contains=search)
                 | Q(employee_number__iexact=search)
                 | Q(job_title__icontains=search)
             )
@@ -68,30 +95,157 @@ class WorkerListCreateView(WritesNeedPayments, generics.ListAPIView):
     def post(self, request, org_id):
         serializer = WorkerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        worker, _created = services.add_worker(membership=self.membership, **serializer.validated_data)
+        data = serializer.validated_data
+        worker, _code = register.invite(membership=self.membership, salary_amount=data.pop("salary"), **data)
         return Response(WorkerSerializer(worker).data, status=status.HTTP_201_CREATED)
 
 
-class WorkerImportView(WritesNeedPayments, APIView):
+class WorkerImportView(WorkersNeedManage, APIView):
     parser_classes = (JSONParser, MultiPartParser, FormParser)
 
     def post(self, request, org_id):
         serializer = WorkerImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        result = services.import_workers(membership=self.membership, rows=serializer.validated_data["rows"])
+        result = register.import_workers(membership=self.membership, rows=serializer.validated_data["rows"])
         return Response(result)
 
 
-class WorkerDetailView(WritesNeedPayments, APIView):
+class WorkerDetailView(WorkersNeedManage, APIView):
+    def get(self, request, org_id, worker_id):
+        return Response(WorkerSerializer(register.get(self.membership, worker_id)).data)
+
     def patch(self, request, org_id, worker_id):
         serializer = WorkerUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        worker = services.update_worker(membership=self.membership, worker_id=worker_id, **serializer.validated_data)
-        return Response(WorkerSerializer(worker).data)
+        register.update(membership=self.membership, worker_id=worker_id, **serializer.validated_data)
+        return Response(WorkerSerializer(register.get(self.membership, worker_id)).data)
 
     def delete(self, request, org_id, worker_id):
-        services.update_worker(membership=self.membership, worker_id=worker_id, is_active=False)
+        """Removes the worker (or cancels the invitation or request); their pay history stays."""
+        register.deactivate(membership=self.membership, worker_id=worker_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkerActionView(OrgScopedMixin, APIView):
+    """POST .../workers/<id>/{approve,decline,suspend,reactivate,resend-invitation}/"""
+
+    ACTIONS = {
+        "approve": Perm.APPROVE_WORKER,
+        "decline": Perm.APPROVE_WORKER,
+        "suspend": Perm.MANAGE_WORKERS,
+        "reactivate": Perm.MANAGE_WORKERS,
+        "resend-invitation": Perm.MANAGE_WORKERS,
+    }
+
+    def perm_for(self, request):
+        perm = self.ACTIONS.get(self.kwargs["action"])
+        if perm is None:
+            raise BusinessError("Unknown action.", "not_found", status.HTTP_404_NOT_FOUND)
+        return perm
+
+    def post(self, request, org_id, worker_id, action):
+        serializer = WorkerActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data, ids = serializer.validated_data, {"membership": self.membership, "worker_id": worker_id}
+        if action == "approve":
+            if "salary" not in data:
+                raise BusinessError("Enter the worker's salary.", "salary_required")
+            worker = register.approve(**ids, salary_amount=data["salary"], job_title=data["job_title"],
+                                      employee_number=data["employee_number"])  # fmt: skip
+        elif action == "decline":
+            worker = register.decline(**ids, reason=data["reason"])
+        elif action == "suspend":
+            worker = register.suspend(**ids, reason=data["reason"])
+        elif action == "reactivate":
+            worker = register.reactivate(**ids)
+        else:
+            worker, _code = register.resend_invitation(**ids)
+        return Response(WorkerSerializer(worker).data)
+
+
+class JoinCodeView(OrgScopedMixin, APIView):
+    """GET/POST/DELETE .../worker-join-code/ — the code (and QR link) workers use to ask to join.
+
+    POST makes a new code (the old one stops working); DELETE switches joining by code off.
+    """
+
+    perm = Perm.APPROVE_WORKER
+
+    def get(self, request, org_id):
+        return Response(self.body(self.membership.organization.worker_join_code))
+
+    def post(self, request, org_id):
+        organization = register.set_join_code(membership=self.membership, enabled=True)
+        return Response(self.body(organization.worker_join_code), status=status.HTTP_201_CREATED)
+
+    def delete(self, request, org_id):
+        register.set_join_code(membership=self.membership, enabled=False)
+        return Response(self.body(None))
+
+    @staticmethod
+    def body(code):
+        if not code:
+            return {"enabled": False, "code": None, "link": None}
+        return {"enabled": True, "code": register.display_code(code),
+                "link": settings.WORKER_JOIN_LINK.format(code=code)}  # fmt: skip
+
+
+# --- The worker's own side ------------------------------------------------------------------------
+
+
+class CodeThrottled(APIView):
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "worker_codes"
+
+
+class InvitationPreviewView(CodeThrottled):
+    """POST /worker-invitations/preview/ {code} — who invited you, before you accept."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.preview_invitation(serializer.validated_data["code"])
+        return Response({"business": worker.organization.name, "name": worker.full_name,
+                         "job_title": worker.job_title, "expires_at": worker.invite_expires_at})  # fmt: skip
+
+
+class InvitationAcceptView(CodeThrottled):
+    """POST /worker-invitations/accept/ {code} — you start being paid by the business, into your own wallet."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.accept_invitation(user=request.user, code=serializer.validated_data["code"])
+        return Response(EmployerSerializer(worker).data)
+
+
+class JoinRequestView(CodeThrottled):
+    """POST /employers/join/ {code} — ask to join a business with its join code (typed, or scanned from its QR)."""
+
+    def post(self, request):
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        worker = register.request_to_join(user=request.user, join_code=serializer.validated_data["code"])
+        return Response(EmployerSerializer(worker).data, status=status.HTTP_201_CREATED)
+
+
+class MyEmployersView(generics.ListAPIView):
+    """GET /employers/ — the businesses you work for, have asked to join, or are invited to by your account."""
+
+    serializer_class = EmployerSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return Worker.objects.select_related("organization", "wallet").filter(
+            user=self.request.user, status__in=Worker.OPEN
+        )
+
+
+class LeaveEmployerView(APIView):
+    """POST /employers/<id>/leave/ — stop working for a business. Your FluxPay account stays yours."""
+
+    def post(self, request, worker_id):
+        return Response(EmployerSerializer(register.leave(user=request.user, worker_id=worker_id)).data)
 
 
 # --- Pay runs -----------------------------------------------------------------------------------
@@ -122,6 +276,20 @@ class PayRunDetailView(WritesNeedPayments, APIView):
     def delete(self, request, org_id, run_id):
         run = services.cancel_pay_run(membership=self.membership, run_id=run_id)
         return Response(PayRunSerializer(run).data)
+
+
+class PayslipAddView(WritesNeedPayments, APIView):
+    """POST .../pay-runs/<id>/payslips/ — an extra line in a draft run, e.g. an allowance or a bonus."""
+
+    def post(self, request, org_id, run_id):
+        serializer = PayslipCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        run = services.add_payslip(
+            membership=self.membership, run_id=run_id, worker_id=data["worker_id"], amount=data["amount"],
+            type_=data["type"],
+        )  # fmt: skip
+        return Response(PayRunDetailSerializer(run).data, status=status.HTTP_201_CREATED)
 
 
 class PayslipEditView(WritesNeedPayments, APIView):
@@ -168,21 +336,25 @@ class PayslipReverseView(OrgScopedMixin, APIView):
         payslip = services.reverse_payslip(
             membership=self.membership, payslip_id=payslip_id, reason=serializer.validated_data["reason"]
         )
-        from .serializers import PayslipSerializer
-
         return Response(PayslipSerializer(payslip).data)
 
 
 class MyPayslipListView(generics.ListAPIView):
-    """A worker's own pay from every business that pays them through FluxPay."""
+    """A worker's own pay (salaries, allowances, bonuses...) from every business that pays them through FluxPay.
+
+    Only payments to them as a worker: what a business pays them for anything else isn't pay.
+    """
 
     serializer_class = MyPayslipSerializer
 
     def get_queryset(self):
         return (
-            Payslip.objects.select_related("pay_run__organization", "worker__wallet", "transfer")
-            .filter(worker__wallet__owner=self.request.user, status__in=[Payslip.Status.PAID, Payslip.Status.REVERSED])
-            .order_by("-pay_run__paid_at")
+            Payment.objects.select_related("organization", "pay_run", "worker__wallet")
+            .filter(
+                worker__wallet__owner=self.request.user,
+                status__in=[Payment.Status.COMPLETED, Payment.Status.REVERSED],
+            )
+            .order_by("-completed_at")
         )
 
 
@@ -274,6 +446,14 @@ class CategoryListCreateView(OrgScopedMixin, APIView):
         return Response(CategorySerializer(account).data, status=status.HTTP_201_CREATED)
 
 
+class ReconciliationView(OrgScopedMixin, APIView):
+    """GET .../books/reconciliation/ — do the cashbook, ledger, payments and payouts all match? (see
+    accounting.business_reconciliation). Members who can see the books can see this."""
+
+    def get(self, request, org_id):
+        return Response(reconcile_business(self.membership.organization))
+
+
 class BookEntryView(OrgScopedMixin, APIView):
     perm = Perm.INITIATE_PAYMENT
 
@@ -289,3 +469,82 @@ class BookEntryView(OrgScopedMixin, APIView):
         entry = books.reclassify(entry=entry, new_category=category, actor=request.user,
                                  note=serializer.validated_data["note"])  # fmt: skip
         return Response(BookEntrySerializer(entry).data)
+
+
+# --- Bills (payables) and invoices (receivables) ---------------------------------------------------
+
+
+class InvoiceListCreateView(WritesNeedPayments, APIView):
+    """GET .../books/invoices/?kind=BILL|INVOICE&open=1 — with what's still owed each way.
+    POST — records a bill or invoice (owners, admins, finance)."""
+
+    def get(self, request, org_id):
+        organization = self.membership.organization
+        wallet = _wallet(self.membership)
+        items = Invoice.objects.filter(organization=organization).select_related("category", "created_by")
+        kind = request.query_params.get("kind")
+        if kind in Invoice.Kind.values:
+            items = items.filter(kind=kind)
+        if request.query_params.get("open"):
+            items = items.filter(status__in=(Invoice.Status.OPEN, Invoice.Status.PART_PAID))
+        totals = {k: str(v) for k, v in invoices.totals(organization, wallet.currency).items()}
+        return Response({"currency": wallet.currency, "totals": totals,
+                         "results": InvoiceSerializer(items[:200], many=True).data})  # fmt: skip
+
+    def post(self, request, org_id):
+        serializer = InvoiceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        wallet = _wallet(self.membership)
+        category = LedgerAccount.objects.filter(id=data["category_id"], organization_id=org_id).first()
+        if category is None:
+            raise BusinessError("Category not found.", "not_found", status.HTTP_404_NOT_FOUND)
+        invoice = invoices.create(
+            organization=self.membership.organization, kind=data["kind"], party=data["party"], amount=data["amount"],
+            category=category, currency=wallet.currency, actor=request.user, description=data["description"],
+            issue_date=data["issue_date"], due_date=data["due_date"],
+        )  # fmt: skip
+        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+class InvoiceMixin(WritesNeedPayments):
+    def invoice(self, invoice_id) -> Invoice:
+        invoice = Invoice.objects.filter(id=invoice_id, organization_id=self.membership.organization_id).first()
+        if invoice is None:
+            raise BusinessError("Bill or invoice not found.", "not_found", status.HTTP_404_NOT_FOUND)
+        return invoice
+
+
+class InvoiceDetailView(InvoiceMixin, APIView):
+    def get(self, request, org_id, invoice_id):
+        return Response(InvoiceSerializer(self.invoice(invoice_id)).data)
+
+
+class InvoicePayableEntriesView(InvoiceMixin, APIView):
+    """GET — the cashbook entries that could pay this bill (or collect this invoice), newest first."""
+
+    def get(self, request, org_id, invoice_id):
+        entries = invoices.payable_entries(self.invoice(invoice_id))[:50]
+        return Response(BookEntrySerializer(entries, many=True).data)
+
+
+class InvoicePayView(InvoiceMixin, APIView):
+    """POST {entry_id} — this cashbook entry pays the bill (or collects the invoice)."""
+
+    def post(self, request, org_id, invoice_id):
+        serializer = InvoicePaySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice = self.invoice(invoice_id)
+        entry = BusinessEntry.objects.filter(id=serializer.validated_data["entry_id"], organization_id=org_id).first()
+        if entry is None:
+            raise BusinessError("Cashbook entry not found.", "entry_not_found", status.HTTP_404_NOT_FOUND)
+        return Response(InvoiceSerializer(invoices.pay(invoice=invoice, entry=entry, actor=request.user)).data)
+
+
+class InvoiceCancelView(InvoiceMixin, APIView):
+    def post(self, request, org_id, invoice_id):
+        serializer = InvoiceCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice = invoices.cancel(invoice=self.invoice(invoice_id), actor=request.user,
+                                  reason=serializer.validated_data["reason"])  # fmt: skip
+        return Response(InvoiceSerializer(invoice).data)

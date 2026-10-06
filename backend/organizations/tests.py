@@ -6,13 +6,14 @@ from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
+from accounting.models import BusinessEntry
 from audit.models import AuditEvent
-from banking.models import Transaction
+from banking.models import Account, Transaction
 from banking.services import open_wallet, transfer_funds
 from fluxpay.celery import app as celery_app
 from fluxpay.testing import funded
@@ -21,7 +22,7 @@ from payments import services as payment_services
 from payments.models import ExternalPayment
 
 from . import services
-from .models import Invitation, Membership, Organization, PaymentRequest
+from .models import Invitation, Membership, Organization, Payment
 
 User = get_user_model()
 FAKE = {"FAKE": "payments.providers.fake.FakeProvider"}
@@ -74,9 +75,9 @@ class BusinessTestCase(APITestCase):
 
     def pay(self, user, amount, key, to=None):
         return self.as_user(user).post(
-            self.url("payment-requests/"),
+            self.url("payments/"),
             {
-                "source_account_id": str(self.wallet.id),
+                "type": "SUPPLIER",
                 "destination_account_number": to or personal_wallet(self.outsider).account_number,
                 "amount": amount,
                 "note": "Supplier invoice",
@@ -87,6 +88,10 @@ class BusinessTestCase(APITestCase):
 
 
 class OrganizationTests(BusinessTestCase):
+    def test_a_business_has_one_cashbook(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Account.objects.create(owner=self.owner, organization=self.org, currency="KES", name="Second wallet")
+
     def test_creating_a_business_makes_you_owner_with_an_empty_wallet(self):
         res = self.as_user(self.outsider).post("/api/v1/organizations/", {"name": "Oscar Shop"}, format="json")
         self.assertEqual(res.status_code, 201, res.data)
@@ -99,7 +104,7 @@ class OrganizationTests(BusinessTestCase):
         self.assertEqual([o["name"] for o in listing.data], ["Oscar Shop"])
 
     def test_non_members_cannot_see_the_business(self):
-        for path in ("", "members/", "accounts/", "transactions/", "payment-requests/"):
+        for path in ("", "members/", "accounts/", "transactions/", "payments/"):
             res = self.as_user(self.outsider).get(self.url(path))
             self.assertEqual(res.status_code, 404, path)
             self.assertEqual(res.data["error"]["code"], "organization_not_found")
@@ -131,7 +136,7 @@ class OrganizationTests(BusinessTestCase):
 
 
 class BusinessWalletIsolationTests(BusinessTestCase):
-    """Business money must only move through approved payment requests."""
+    """Business money must only move through business payments."""
 
     def test_business_wallet_is_not_a_personal_account(self):
         res = self.as_user(self.owner).get("/api/v1/accounts/")
@@ -283,16 +288,14 @@ class PaymentApprovalTests(BusinessTestCase):
         self.recipient = personal_wallet(self.outsider)
 
     def decide(self, user, request_id, decision, note=""):
-        return self.as_user(user).post(
-            self.url(f"payment-requests/{request_id}/{decision}/"), {"note": note}, format="json"
-        )
+        return self.as_user(user).post(self.url(f"payments/{request_id}/{decision}/"), {"note": note}, format="json")
 
     def test_payment_up_to_threshold_is_sent_straight_away(self):
         self.org.approval_threshold = Decimal("200.00")
         self.org.save()
         res = self.pay(self.fiona, "150.00", "small-pay-1")
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertEqual(res.data["status"], "EXECUTED")
+        self.assertEqual(res.data["status"], "COMPLETED")
         self.assertIsNotNone(res.data["reference"])
         self.assertEqual(self.balance(self.wallet), Decimal("650.00"))
         self.assertEqual(self.balance(self.recipient), Decimal("1150.00"))
@@ -309,7 +312,7 @@ class PaymentApprovalTests(BusinessTestCase):
 
         res = self.decide(self.adam, request_id, "approve", "Invoice checked")
         self.assertEqual(res.status_code, 200, res.data)
-        self.assertEqual(res.data["status"], "EXECUTED")
+        self.assertEqual(res.data["status"], "COMPLETED")
         self.assertEqual(res.data["decided_by"], "adam@acme.test")
         self.assertEqual(self.balance(self.wallet), Decimal("500.00"))
         self.assertEqual(self.balance(self.recipient), Decimal("1300.00"))
@@ -347,12 +350,43 @@ class PaymentApprovalTests(BusinessTestCase):
         self.assertEqual(self.balance(self.wallet), Decimal("800.00"))
         self.assertTrue(AuditEvent.objects.filter(action="org.payment.failed").exists())
 
+    def test_wrong_payment_is_reversed_back_into_the_cashbook(self):
+        self.org.approval_threshold = Decimal("1000.00")
+        self.org.save()
+        payment = self.pay(self.owner, "300.00", "supplier-oops-1").data
+        self.assertEqual(self.balance(self.wallet), Decimal("500.00"))
+        reverse = self.url(f"payments/{payment['id']}/reverse/")
+        self.assertEqual(self.as_user(self.fiona).post(reverse, {"reason": "Wrong supplier"}).status_code, 403)
+
+        res = self.as_user(self.adam).post(reverse, {"reason": "Paid the wrong supplier"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["status"], "REVERSED")
+        self.assertEqual(self.balance(self.wallet), Decimal("800.00"))
+        back = BusinessEntry.objects.get(reference=res.data["reversal_reference"])
+        self.assertEqual((back.direction, back.source, back.category.name), ("IN", "REVERSAL", "Purchases and suppliers"))
+        again = self.as_user(self.adam).post(reverse, {"reason": "Paid the wrong supplier"}, format="json")
+        self.assertEqual(again.data["error"]["code"], "not_paid")
+
+    def test_reversing_a_payment_to_another_business_fixes_both_books(self):
+        self.org.approval_threshold = Decimal("1000.00")
+        self.org.save()
+        supplier = services.create_organization(user=self.outsider, name="Oscar Supplies")
+        cashbook = supplier.accounts.get()
+        payment = self.pay(self.owner, "300.00", "b2b-payment-1", to=cashbook.account_number).data
+        self.as_user(self.adam).post(
+            self.url(f"payments/{payment['id']}/reverse/"), {"reason": "Invoice was cancelled"}, format="json"
+        )
+        lines = BusinessEntry.objects.filter(wallet=cashbook).order_by("created_at")
+        self.assertEqual([(e.direction, e.category.name) for e in lines],
+                         [("IN", "Sales and revenue"), ("OUT", "Sales and revenue")])  # fmt: skip
+        self.assertEqual(self.balance(cashbook), Decimal("0.00"))
+
     def test_retry_with_same_key_is_one_payment(self):
         first = self.pay(self.fiona, "300.00", "same-key-01")
         second = self.pay(self.fiona, "300.00", "same-key-01")
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.data["id"], second.data["id"])
-        self.assertEqual(PaymentRequest.objects.count(), 1)
+        self.assertEqual(Payment.objects.count(), 1)
 
     def test_viewers_cannot_initiate(self):
         vera = self.add_member("vera@acme.test", "Vera Viewer", Membership.Role.VIEWER)
@@ -364,7 +398,7 @@ class PaymentApprovalTests(BusinessTestCase):
 
     def test_pending_list_filter(self):
         self.pay(self.fiona, "300.00", "list-pay-1")
-        res = self.as_user(self.adam).get(self.url("payment-requests/"), {"status": "PENDING_APPROVAL"})
+        res = self.as_user(self.adam).get(self.url("payments/"), {"status": "PENDING_APPROVAL"})
         self.assertEqual(res.data["count"], 1)
 
 
@@ -416,8 +450,8 @@ class ApprovalRaceTests(TransactionTestCase):
             approvers.append(Membership.objects.create(organization=org, user=user, role=Membership.Role.ADMIN))
         recipient = make_user("oscar@other.test", "Oscar Outsider")
         creator = Membership.objects.get(organization=org, user=owner)
-        request, _ = services.create_payment_request(
-            membership=creator, source_account_id=wallet.id,
+        request, _ = services.create_payment(
+            membership=creator, type="SUPPLIER",
             destination_account_number=personal_wallet(recipient).account_number,
             amount=Decimal("300.00"), note="", idempotency_key="race-pay-1",
         )
@@ -427,7 +461,7 @@ class ApprovalRaceTests(TransactionTestCase):
             try:
                 barrier.wait()
                 membership = Membership.objects.select_related("organization", "user").get(id=membership.id)
-                services.approve_payment_request(membership=membership, request_id=request.id)
+                services.approve_payment(membership=membership, payment_id=request.id)
                 outcomes.append("approved")
             except BusinessError as exc:
                 outcomes.append(exc.error_code)

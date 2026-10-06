@@ -126,6 +126,7 @@ dependencies {
     implementation(project(":feature:transactions"))
     implementation(project(":feature:settings"))
     implementation(project(":feature:budget"))
+    implementation(project(":feature:business"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)

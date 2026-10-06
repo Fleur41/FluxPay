@@ -22,6 +22,9 @@ datastore = "1.1.1"
 room = "2.6.1"
 biometric = "1.1.0"
 coreSplashscreen = "1.0.1"
+# QR codes: drawing a business's join code, and scanning one (Play services scanner: no camera permission)
+zxing = "3.5.3"
+codeScanner = "16.1.0"
 
 # Kotlin
 coroutines = "1.9.0"
@@ -42,6 +45,8 @@ androidxJunit = "1.2.1"
 espresso = "3.6.1"
 
 [libraries]
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+play-services-code-scanner = { group = "com.google.android.gms", name = "play-services-code-scanner", version.ref = "codeScanner" }
 # Core & Lifecycle
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }

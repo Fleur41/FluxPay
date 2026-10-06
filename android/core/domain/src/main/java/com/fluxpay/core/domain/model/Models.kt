@@ -10,6 +10,20 @@ data class User(
     val phoneNumber: String,
 )
 
+/** What email + password lead to: signed in, or a code from the authenticator app still needed. */
+sealed interface LoginResult {
+    data class SignedIn(val user: User) : LoginResult
+
+    /** Two-step verification is on: send a code with [mfaToken] (valid for a few minutes). */
+    data class NeedsCode(val mfaToken: String) : LoginResult
+}
+
+/** Two-step verification on this account. [required]: they own or run a business (or are FluxPay staff). */
+data class MfaStatus(val enabled: Boolean, val required: Boolean, val recoveryCodesLeft: Int)
+
+/** A new authenticator secret: typed in as [secret], or opened in the app as [otpauthUri]. */
+data class MfaSetup(val secret: String, val otpauthUri: String)
+
 data class Account(
     val id: String,
     val accountNumber: String,
@@ -81,3 +95,6 @@ data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val hideBalances: Boolean = false,
 )
+
+/** Money sent out of FluxPay to M-Pesa: the wallet is debited at once, and M-Pesa confirms it a little later. */
+data class MpesaWithdrawal(val id: String, val amount: BigDecimal, val currency: String, val reference: String, val status: String)

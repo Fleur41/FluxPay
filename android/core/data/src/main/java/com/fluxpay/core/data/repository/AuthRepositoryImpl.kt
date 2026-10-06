@@ -10,6 +10,9 @@ import com.fluxpay.core.data.mapper.toDomain
 import com.fluxpay.core.data.mapper.toEntity
 import com.fluxpay.core.database.FluxPayDatabase
 import com.fluxpay.core.database.dao.UserDao
+import com.fluxpay.core.domain.model.LoginResult
+import com.fluxpay.core.domain.model.MfaSetup
+import com.fluxpay.core.domain.model.MfaStatus
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.repository.AuthRepository
 import com.fluxpay.core.domain.repository.StatementRepository
@@ -17,6 +20,9 @@ import com.fluxpay.core.network.ApiCaller
 import com.fluxpay.core.network.api.FluxPayApi
 import com.fluxpay.core.network.dto.AuthResponseDto
 import com.fluxpay.core.network.dto.LoginRequestDto
+import com.fluxpay.core.network.dto.MfaLoginDto
+import com.fluxpay.core.network.dto.MfaDisableDto
+import com.fluxpay.core.network.dto.MfaCodeDto
 import com.fluxpay.core.network.dto.PasswordResetConfirmDto
 import com.fluxpay.core.network.dto.PasswordResetRequestDto
 import com.fluxpay.core.network.dto.RefreshRequestDto
@@ -41,8 +47,45 @@ class AuthRepositoryImpl @Inject constructor(
 
     override val isLoggedIn: Flow<Boolean> = tokenStore.isLoggedIn
 
-    override suspend fun login(email: String, password: String): NetworkResult<User> = withContext(io) {
-        apiCaller { api.login(LoginRequestDto(email.trim().lowercase(), password)) }.persistSession()
+    override suspend fun login(email: String, password: String): NetworkResult<LoginResult> = withContext(io) {
+        when (val result = apiCaller { api.login(LoginRequestDto(email.trim().lowercase(), password)) }) {
+            is NetworkResult.Success -> {
+                val body = result.data
+                val token = body.mfaToken
+                if (body.mfaRequired && token != null) {
+                    NetworkResult.Success(LoginResult.NeedsCode(token))
+                } else {
+                    NetworkResult.Success(AuthResponseDto(checkNotNull(body.access), checkNotNull(body.refresh), checkNotNull(body.user)))
+                        .persistSession().map { LoginResult.SignedIn(it) }
+                }
+            }
+            is NetworkResult.Error -> result
+            NetworkResult.Loading -> NetworkResult.Loading
+        }
+    }
+
+    override suspend fun completeLogin(mfaToken: String, code: String): NetworkResult<User> = withContext(io) {
+        apiCaller { api.loginMfa(MfaLoginDto(mfaToken, code.trim())) }.persistSession()
+    }
+
+    override suspend fun mfaStatus() = withContext(io) {
+        apiCaller { api.mfaStatus() }.map { MfaStatus(it.enabled, it.required, it.recoveryCodesLeft) }
+    }
+
+    override suspend fun startMfaSetup() = withContext(io) {
+        apiCaller { api.mfaSetup() }.map { MfaSetup(it.secret, it.otpauthUri) }
+    }
+
+    override suspend fun enableMfa(code: String) = withContext(io) {
+        apiCaller { api.mfaEnable(MfaCodeDto(code.trim())) }.map { it.recoveryCodes }
+    }
+
+    override suspend fun disableMfa(password: String, code: String) = withContext(io) {
+        apiCaller { api.mfaDisable(MfaDisableDto(password, code.trim())) }.map { }
+    }
+
+    override suspend fun newRecoveryCodes(code: String) = withContext(io) {
+        apiCaller { api.mfaRecoveryCodes(MfaCodeDto(code.trim())) }.map { it.recoveryCodes }
     }
 
     override suspend fun register(

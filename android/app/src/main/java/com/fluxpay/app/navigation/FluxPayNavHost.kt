@@ -9,11 +9,14 @@ import com.fluxpay.feature.auth.navigation.AuthRoutes
 import com.fluxpay.feature.auth.navigation.authGraph
 import com.fluxpay.feature.budget.navigation.budgetScreen
 import com.fluxpay.feature.budget.navigation.navigateToBudget
+import com.fluxpay.feature.business.navigation.BusinessRoutes
+import com.fluxpay.feature.business.navigation.businessScreens
 import com.fluxpay.feature.dashboard.navigation.DashboardRoutes
 import com.fluxpay.feature.dashboard.navigation.dashboardScreen
 import com.fluxpay.feature.settings.navigation.settingsScreen
 import com.fluxpay.feature.transactions.navigation.navigateToTransaction
 import com.fluxpay.feature.transactions.navigation.transactionsScreens
+import com.fluxpay.feature.transfer.navigation.TransferRoutes
 import com.fluxpay.feature.transfer.navigation.transferScreen
 
 const val MAIN_GRAPH = "main_graph"
@@ -21,7 +24,7 @@ const val MAIN_GRAPH = "main_graph"
 /**
  * Root graph = two nested graphs:
  *   auth_graph  → login, register, forgot/reset password
- *   main_graph  → dashboard, transfer, transactions (+ detail), settings, budget planner
+ *   main_graph  → dashboard, transfer, transactions (+ detail), business (payroll, books), settings, budget planner
  * Each feature module contributes its own destinations through a NavGraphBuilder extension.
  */
 @Composable
@@ -30,23 +33,37 @@ fun FluxPayNavHost(
     startDestination: String,
     modifier: Modifier = Modifier,
 ) {
-    NavHost(navController = navController, startDestination = startDestination, modifier = modifier) {
+    NavHost(
+        navController = navController,
+        startDestination = startDestination,
+        modifier = modifier
+    ) {
         authGraph(navController)
 
         navigation(startDestination = DashboardRoutes.DASHBOARD, route = MAIN_GRAPH) {
             dashboardScreen(
                 onSendMoney = { navController.navigateToTopLevel(TopLevelDestination.SEND) },
+                onSendToMpesa = { navController.navigate(TransferRoutes.MPESA) },
                 onSeeAllTransactions = { navController.navigateToTopLevel(TopLevelDestination.ACTIVITY) },
                 onTransactionClick = { navController.navigateToTransaction(it.id) },
                 onOpenBudget = { navController.navigateToBudget() },
+                onOpenBusiness = { id -> navController.navigate("business/$id") },
+                onJoinEmployer = { navController.navigate(BusinessRoutes.JOIN_START) },
             )
             transferScreen(
                 onDone = { navController.navigateToTopLevel(TopLevelDestination.HOME) },
                 onViewTransaction = { id -> navController.navigateToTransaction(id) },
+                onBack = navController::popBackStack,
             )
             transactionsScreens(navController)
-            settingsScreen()
+            settingsScreen(
+                navController,
+                onOpenEmployers = { navController.navigate(BusinessRoutes.EMPLOYERS) },
+                onStartBusiness = { navController.navigate(BusinessRoutes.NEW) },
+                onJoinTeam = { navController.navigate(BusinessRoutes.JOIN_TEAM_START) },
+            )
             budgetScreen(onBack = navController::popBackStack)
+            businessScreens(navController)
         }
     }
 }

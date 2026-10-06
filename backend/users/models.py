@@ -1,6 +1,10 @@
 import uuid
 
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.auth.models import (
+    AbstractBaseUser,
+    BaseUserManager,
+    PermissionsMixin,
+)
 from django.db import models
 from django.utils import timezone
 
@@ -38,6 +42,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
+    # Two-step verification (users.mfa). Secrets are encrypted; the pending one waits for a confirming code.
+    mfa_secret = models.TextField(blank=True, editable=False)
+    mfa_pending_secret = models.TextField(blank=True, editable=False)
+    mfa_enabled_at = models.DateTimeField(null=True, blank=True, editable=False)
+    mfa_last_counter = models.BigIntegerField(default=0, editable=False)  # a code works once
 
     objects = UserManager()
 
@@ -47,3 +56,19 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+    @property
+    def mfa_enabled(self) -> bool:
+        return self.mfa_enabled_at is not None
+
+
+class MfaRecoveryCode(models.Model):
+    """One single-use code for when the authenticator app is lost. Only its SHA-256 is stored."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="mfa_recovery_codes")
+    code_hash = models.CharField(max_length=64)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=("user", "code_hash"))]

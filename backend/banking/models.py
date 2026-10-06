@@ -41,6 +41,10 @@ class Account(models.Model):
                 condition=models.Q(balance__gte=0) | models.Q(system_key__isnull=False),
                 name="account_balance_non_negative",
             ),
+            # A business has exactly one cashbook: every movement of its money goes through this one wallet.
+            models.UniqueConstraint(
+                fields=("organization",), condition=models.Q(organization__isnull=False), name="one_cashbook_per_business"
+            ),
         ]
 
     def __str__(self) -> str:

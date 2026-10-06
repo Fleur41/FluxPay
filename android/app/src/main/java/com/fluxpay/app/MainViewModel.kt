@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.domain.usecase.LogoutUseCase
+import com.fluxpay.core.domain.usecase.ObserveCanSeeBusinessUseCase
 import com.fluxpay.core.domain.usecase.ObservePreferencesUseCase
 import com.fluxpay.core.domain.usecase.ObserveSessionUseCase
+import com.fluxpay.core.domain.usecase.RefreshMyBusinessesUseCase
 import com.fluxpay.core.domain.usecase.RefreshPlatformConfigUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -30,12 +32,18 @@ class MainViewModel @Inject constructor(
     observePreferences: ObservePreferencesUseCase,
     private val logoutUseCase: LogoutUseCase,
     private val refreshConfig: RefreshPlatformConfigUseCase,
+    observeCanSeeBusiness: ObserveCanSeeBusinessUseCase,
+    private val refreshMyBusinesses: RefreshMyBusinessesUseCase,
 ) : ViewModel() {
 
     /** The splash screen stays up until this leaves Loading. */
     val uiState: StateFlow<MainUiState> = combine(observeSession(), observePreferences()) { loggedIn, prefs ->
         MainUiState.Ready(isLoggedIn = loggedIn, themeMode = prefs.themeMode)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MainUiState.Loading)
+
+    /** The Business tab is for people who run a business; workers and personal users don't see it. */
+    val showBusinessTab: StateFlow<Boolean> =
+        observeCanSeeBusiness().stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /**
      * Deep links are parked here (as plain strings — no Context or Intent is held) until
@@ -53,7 +61,10 @@ class MainViewModel @Inject constructor(
                 if (wasLoggedIn && !loggedIn) viewModelScope.launch { logoutUseCase(revokeRemotely = false) }
                 // Business rules (limits, currencies, timeout) are re-read at each sign-in, so staff changes
                 // reach phones without an app update. A failure keeps the cached copy.
-                if (loggedIn && !wasLoggedIn) viewModelScope.launch { refreshConfig() }
+                if (loggedIn && !wasLoggedIn) {
+                    viewModelScope.launch { refreshConfig() }
+                    viewModelScope.launch { refreshMyBusinesses() } // decides whether the Business tab shows
+                }
                 wasLoggedIn = loggedIn
             }
             .launchIn(viewModelScope)

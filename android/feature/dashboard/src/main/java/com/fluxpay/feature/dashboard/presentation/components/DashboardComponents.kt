@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -27,6 +28,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.fluxpay.core.common.util.maskAccountNumber
 import com.fluxpay.core.domain.model.Account
+import com.fluxpay.core.domain.model.BusinessBalance
+import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.ui.components.MoneyText
 
 /** Icon above label, so three actions fit side by side on a phone. */
@@ -91,6 +94,79 @@ fun BudgetPlannerCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 Text("Budget planner", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "Plan your month and see what's left",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+        }
+    }
+}
+
+
+/** A business the user runs: its cashbook balance, next to their personal one. Tapping opens the business. */
+@Composable
+fun BusinessCashbookCard(item: BusinessBalance, hideBalances: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Card(onClick = onClick, modifier = modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Storefront, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.business.name, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    listOfNotNull(
+                        "Business account",
+                        item.cashbook?.accountNumber?.maskAccountNumber(),
+                        "you are ${item.business.roleLabel.lowercase()}",
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            val cashbook = item.cashbook
+            if (cashbook != null) {
+                MoneyText(
+                    amount = cashbook.balance,
+                    currency = cashbook.currency,
+                    hidden = hideBalances,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            } else {
+                Text("Unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+        }
+    }
+}
+
+/** One payment the user received as a worker (salary, allowance, bonus...). */
+@Composable
+fun MyPayRow(pay: MyPayslip, hideBalances: Boolean, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(pay.title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                "${pay.business} · ${pay.payDate}" + if (pay.isReversed) " · ${pay.statusLabel}" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (pay.isReversed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        MoneyText(amount = pay.amount, currency = pay.currency, hidden = hideBalances, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+
+/** For people not yet paid by a business: the way in to join their employer (invitation code or QR). */
+@Composable
+fun JoinEmployerCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Card(onClick = onClick, modifier = modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Storefront, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Do you work for a business?", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Join your employer with your invitation code or their QR code, and get paid here",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -78,11 +78,13 @@ fun BalanceCard(
     modifier: Modifier = Modifier,
     footer: String? = null,
 ) {
+    val shape = MaterialTheme.shapes.large
+    val brushColors = FluxTheme.colors.heroGradient
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(FluxTheme.colors.heroGradient)
+            .clip(shape)
+            .background(brushColors)
             .padding(24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

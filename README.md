@@ -21,7 +21,7 @@ FluxPay/
 | **Statements** | PDF or CSV account statements for a date range, shared from the app |
 | **Budget** | Needs / wants / savings planner checked against the staff-set guideline, stored on the device (Room) |
 | **Alerts** | SMS and email transaction alerts, switched on or off per channel in Settings |
-| **Business accounts** | Organizations with members, invitations, shared wallets, payment requests that need approval, and an audit log (API) |
+| **Business accounts** | Organizations with members, invitations, one cashbook (wallet) per business, workers who join by invitation or approved join code (invited, waiting for approval, active, suspended, deactivated), typed payments to workers and saved beneficiaries (suppliers, contractors...) with verification, approval and reversal, payroll, and an audit log (API) |
 | **Receive** | Share your name and account number from the dashboard so people can pay you |
 | **Settings** | Profile, preferred currency, theme (system / light / dark), hide balances — all in DataStore |
 | **Admin dashboard** | Staff back-office at `/admin/`: KPIs, customer balances, wallet top-ups and corrections, business oversight, alerts, audit log and platform rules ([guide](#admin-dashboard)) |
@@ -227,11 +227,11 @@ A label next to the FluxPay name shows **Development** (yellow) or **Production*
 | **Top-ups today** | Staff top-ups and corrections posted today |
 | **Failed transactions (7 days)** | Held payouts that were returned |
 | **Customer money held** | Total balance and wallet count per currency (FluxPay's own system accounts excluded) |
-| **Needs attention** | Business payments waiting for approval, external payments flagged for review, alerts that failed to send. Each links to the filtered list |
+| **Needs attention** | Business payments waiting for approval, external payments flagged for review, bank payouts waiting to be sent, alerts that failed to send. Each links to the filtered list |
 | **Audit log** | Tamper check: confirms no audit record has been altered or removed |
 | **Recent top-ups & corrections** | The last six, with who posted them |
 
-Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Payment approvals**, **Payments** and **Email & SMS alerts** when something is waiting.
+Staff pass two-step verification (an authenticator app) once per session before any page opens; the first time, they set it up there. Opening a business's records is written to that business's own audit log (`staff.viewed_business_data`), which its owners can read. Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Business payments**, **Payments** and **Email & SMS alerts** when something is waiting.
 
 ### What each screen is for
 
@@ -243,9 +243,9 @@ Staff only see the panels and menu items their permissions allow. The sidebar sh
 | | **Transactions** | Every ledger line, filterable by type, category, status and date; search by reference |
 | | **Transfers** | Every customer-to-customer transfer |
 | Businesses | **Businesses** | Suspend or reactivate a business; see its members and approval threshold |
-| | **Payment approvals** | Business payments and their approval status. Approving is done by the business's own approvers in the app, not by staff |
+| | **Business payments** | Every payment out of a business cashbook (salaries, allowances, supplier payments...) with its type, status and reference. Approving is done by the business's own approvers in the app, not by staff |
 | | **Invitations** | Pending, accepted and expired invitations |
-| External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review** |
+| External payments | **Payments** | Deposits and withdrawals through payment providers; filter **Needs review**. Filter **Bank payouts to send** for the bank payouts staff send from FluxPay's bank: open one for its payout details, send it, then **Confirm or fail** it with the bank's reference (this also records it in the cashbook). A payout M-Pesa never answered is flagged for review and settled the same way, after checking the M-Pesa portal |
 | | **Provider callbacks** | Raw callbacks received from providers, and what happened to each |
 | Alerts & compliance | **Email & SMS alerts** | Every alert sent, filterable by channel, event and status (use **Failed** to find problems) |
 | | **Audit log** | Who did what and when, across the app and the admin |
@@ -299,7 +299,9 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | Method | Path | |
 |---|---|---|
 | POST | `auth/register/` | public — creates user + wallet, returns tokens |
-| POST | `auth/login/` | public — `{email, password}` → `{access, refresh, user}` |
+| POST | `auth/login/` | public — `{email, password}` → `{access, refresh, user}`, or with two-step verification on `{mfa_required: true, mfa_token}` |
+| POST | `auth/login/mfa/` | public — `{mfa_token, code}` → `{access, refresh, user}`; the code is from the authenticator app, or a recovery code. 10/min; 5 wrong codes lock it for 15 minutes |
+| GET, POST | `auth/mfa/` , `auth/mfa/setup/` , `auth/mfa/enable/` , `auth/mfa/disable/` , `auth/mfa/recovery-codes/` | two-step verification: status (`enabled`, `required`); a new secret and `otpauth_uri`; `{code}` turns it on and returns 10 recovery codes once; `{password, code}` turns it off; `{code}` replaces the recovery codes. Business owners and admins without it can view a business but get `mfa_required` (403) for anything else |
 | POST | `auth/refresh/` | public — rotates refresh token |
 | POST | `auth/logout/` | blacklists the refresh token |
 | GET/PATCH | `auth/me/` | profile |
@@ -312,15 +314,35 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET | `config/` | public — platform settings the app reads at start-up |
 | GET | `statements/?account_id=&date_from=&date_to=&file_format=pdf\|csv` | statement file, 10/min |
 | GET/PATCH | `notifications/settings/` | SMS and email alert preferences |
-| GET | `payments/` , `payments/{id}/` | external deposits and withdrawals |
+| GET | `payments/` , `payments/{id}/` | your external deposits and withdrawals (personal wallets only), with `receipt` once confirmed |
+| POST | `deposits/mpesa/` | `{account_id, phone_number, amount, idempotency_key}`: STK Push; whole shillings; answers 202, poll `payments/{id}/` |
+| POST | `withdrawals/mpesa/` | `{account_id, amount, idempotency_key}`: to the M-Pesa number on your profile only; the money leaves the wallet at once and comes back if M-Pesa fails it |
 | GET/POST | `organizations/` | your businesses; create one |
 | GET/PATCH | `organizations/{id}/` | one business |
 | GET, PATCH/DELETE | `organizations/{id}/members/` , `…/members/{member_id}/` | members and their roles |
 | GET/POST, DELETE | `organizations/{id}/invitations/` , `…/invitations/{invitation_id}/` | invite by email; revoke |
 | POST | `invitations/accept/` | join a business with an invitation token |
-| GET | `organizations/{id}/accounts/` , `…/transactions/` , `…/statements/` , `…/audit-events/` | business wallets, history, statements and audit log |
-| GET/POST | `organizations/{id}/payment-requests/` | payment requests |
-| POST | `organizations/{id}/payment-requests/{request_id}/{approve\|reject\|cancel}/` | decide on a payment request |
+| GET | `organizations/{id}/accounts/` , `…/transactions/` , `…/statements/` , `…/audit-events/` | the business cashbook (its one wallet), history, statements and audit log |
+| GET/POST | `organizations/{id}/payments/?status=&type=&worker=&pay_run=` | every payment out of the cashbook (`pay_run=none`: only one-off payments). POST `{type, worker_id \| destination_account_number, amount, note, books_category?, idempotency_key}`; `type` is `SALARY`, `ALLOWANCE`, `BONUS`, `COMMISSION`, `OTHER_WORKER` (need `worker_id`), or `SUPPLIER`, `VENDOR`, `CONTRACTOR`, `EXPENSE`, `OTHER` (need an account number) |
+| POST | `organizations/{id}/payments/{payment_id}/{approve\|reject\|cancel}/` | decide on a payment waiting for approval (`{note}`) |
+| POST | `organizations/{id}/payments/{payment_id}/reverse/` | take back a paid payment, `{reason}`; owners and admins, within the reversal window |
+| GET/POST | `organizations/{id}/beneficiaries/?search=&kind=&active=all` | saved suppliers, contractors, landlords... POST `{name, kind, method, …details}`; `method` is `FLUXPAY` (`account_number`), `MPESA_MOBILE` (`mpesa_phone`), `MPESA_PAYBILL` (`paybill_number`, `paybill_account`), `MPESA_TILL` (`till_number`) or `BANK` (`bank_name`, `bank_account_name`, `bank_account_number`, optional `bank_branch`, `bank_swift_code`). Viewers see account numbers masked |
+| GET/PATCH/DELETE | `organizations/{id}/beneficiaries/{beneficiary_id}/` | one beneficiary; changing payout details unverifies it; DELETE archives |
+| POST | `organizations/{id}/beneficiaries/{beneficiary_id}/verify/` | an owner or admin confirms the payout details; not the person who entered them, unless they are the only approver. Only verified beneficiaries can be paid: POST `payments/` with `{beneficiary_id, amount, idempotency_key}` (`type` defaults from the kind). M-Pesa and bank beneficiaries are paid out of the cashbook at once; the payment stays `PROCESSING` until M-Pesa or FluxPay staff confirm it (`payout_method`, `payout_receipt`), or `FAILED` with the money back. A `OWN_ACCOUNT` beneficiary takes `WITHDRAWAL`s (owners only, filed as drawings) |
+| POST | `organizations/{id}/deposits/mpesa/` | `{phone_number, amount, idempotency_key}`: STK Push into the business cashbook (filed as owner's capital; re-file it in the books if it was a sale) |
+| GET | `organizations/{id}/external-payments/` , `…/external-payments/{payment_id}/` | the cashbook's M-Pesa and bank deposits and payouts |
+| GET/POST | `organizations/{id}/workers/?status=&search=&active=all` | the worker register (active workers unless `status` is given: `INVITED`, `PENDING_ACTIVATION`, `SUSPENDED`, `DEACTIVATED`). POST invites someone: `{phone_number, full_name, email?, salary, job_title?, employee_number?}` or `{account_number, salary, …}`; they get a code by SMS/email and become `ACTIVE` only when they accept. `workers/import/` invites many (JSON rows or CSV) |
+| GET/PATCH/DELETE | `organizations/{id}/workers/{worker_id}/` | one worker; PATCH pay details; DELETE removes them (or cancels the invitation/request), keeping their pay history |
+| POST | `organizations/{id}/workers/{worker_id}/{approve\|decline\|suspend\|reactivate\|resend-invitation}/` | approve a join request `{salary, job_title?, employee_number?}` (owners, admins); decline or suspend `{reason}`; suspended workers can't be paid |
+| GET/POST/DELETE | `organizations/{id}/worker-join-code/` | the business's join code and its QR link (owners, admins). POST makes a new one (the old stops working), DELETE switches it off |
+| GET | `organizations/{id}/books/reconciliation/` | does the business's money add up: wallet = ledger = cashbook, every movement has its cashbook line, payment statuses match their money, outside payouts settled. `balanced`, `problems`, `attention` (in flight, possible duplicates) |
+| GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
+| POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
+| POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |
+| GET | `payslips/` | a worker's own pay from every business: pay-run lines and one-off salaries, bonuses... (`status` is `PAID` or `REVERSED`) |
+| POST | `worker-invitations/preview/` , `worker-invitations/accept/` | `{code}` from the invitation SMS/email (any case, dash optional): who it's from; accept it to be paid by that business into your own wallet. 30 codes an hour |
+| GET/POST | `employers/` , `employers/join/` | the businesses you work for or asked to join; `{code}` asks to join with a business's join code (typed or scanned), and the business approves |
+| POST | `employers/{worker_id}/leave/` | stop working for a business; your FluxPay account and pay history stay |
 
 Outside `/api/v1/`: `GET /health/` (public) and `POST /hooks/<rail>/<token>/` (payment provider callbacks).
 

@@ -73,6 +73,7 @@ DIRECTION = {
     Category.INTEREST: Direction.RECEIPT,
     Category.OTHER_INCOME: Direction.RECEIPT,
     Category.CUSTOMER_PAYOUT: Direction.PAYMENT,
+    Category.BANK_PAYOUT: Direction.PAYMENT,
     Category.BANK_CHARGES: Direction.PAYMENT,
     Category.EXPENSE: Direction.PAYMENT,
     Category.DRAWINGS: Direction.PAYMENT,
@@ -85,6 +86,8 @@ CONTRA_ROLE = {
     Category.INTEREST: "interest_income",
     Category.OTHER_INCOME: "other_income",
     Category.CUSTOMER_PAYOUT: "customer_funds",
+    # The wallet was already debited into the bank clearing account when the payout was requested.
+    Category.BANK_PAYOUT: "provider_clearing:BANK",
     Category.BANK_CHARGES: "bank_charges",
     Category.EXPENSE: "operating_expenses",
     Category.DRAWINGS: "drawings",

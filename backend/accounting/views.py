@@ -11,10 +11,12 @@ from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 
+from fluxpay.admin_base import record_staff_view
 from fluxpay.exceptions import BusinessError
 from platform_settings.services import platform
 
 from . import reports
+from .business_reconciliation import reconcile as reconcile_business
 from .models import BankAccount, CashbookEntry, LedgerAccount
 from .services import bank_balance, business_date, reconcile_bank
 
@@ -252,6 +254,7 @@ def business_books(request):
     start, end = _period(request)
     context = {"organizations": organizations, "organization": organization, "start": start, "end": end}
     if organization:
+        record_staff_view(request, organization_id=organization.pk, target=organization, page="business books")
         wallets = list(Account.objects.filter(organization=organization).order_by("created_at"))
         wallet = next((w for w in wallets if str(w.pk) == request.GET.get("wallet")), wallets[0] if wallets else None)
         if wallet:
@@ -277,7 +280,8 @@ def business_books(request):
                 cb=cb,
                 pl=reports.income_statement(currency, start, end, organization=organization),
                 bs=reports.balance_sheet(currency, end, organization=organization),
-                workers=organization.workers.filter(is_active=True).count(),
+                workers=organization.workers.filter(status="ACTIVE").count(),
+                check=reconcile_business(organization),
             )
     title = f"{organization.name} – books" if organization else "Business books"
     return _page(request, "accounting/business_books.html", title, **context)

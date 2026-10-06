@@ -58,7 +58,7 @@ class AuthFlowTests(APITestCase):
         res = self.client.post("/api/v1/auth/password-reset/", {"email": "jane@example.com"}, format="json")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(mail.outbox), 1)
-        link = next(line for line in mail.outbox[0].body.splitlines() if line.startswith("fluxpay://"))
+        link = next(line for line in mail.outbox[0].body.splitlines() if "/reset-password?" in line)
         query = dict(part.split("=", 1) for part in link.split("?", 1)[1].split("&"))
         confirm = self.client.post(
             "/api/v1/auth/password-reset/confirm/",

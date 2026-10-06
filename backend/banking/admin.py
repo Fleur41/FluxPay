@@ -5,12 +5,11 @@ from unfold.contrib.filters.admin import RangeDateFilter
 from unfold.decorators import display
 from unfold.widgets import UnfoldAdminSelectWidget
 
-from fluxpay.admin_base import ViewOnlyAdmin, admin_link, money
-from fluxpay.exceptions import BusinessError
-from platform_settings import services as rules
-
 from accounting import services as books
 from accounting.models import CashbookEntry
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin, admin_link, money
+from fluxpay.exceptions import BusinessError
+from platform_settings import services as rules
 
 from .models import Account, ManualAdjustment, Transaction, Transfer
 from .services import post_adjustment
@@ -32,7 +31,7 @@ class WalletTypeFilter(admin.SimpleListFilter):
 
 
 @admin.register(Account)
-class AccountAdmin(ViewOnlyAdmin):
+class AccountAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = ("account_number", "holder", "wallet_type", "balance_display", "status", "created_at")
     list_filter = (WalletTypeFilter, "currency", "is_active")
     search_fields = ("account_number", "owner__email", "owner__full_name", "organization__name")
@@ -76,7 +75,7 @@ class AccountAdmin(ViewOnlyAdmin):
 
 
 @admin.register(Transaction)
-class TransactionAdmin(ViewOnlyAdmin):
+class TransactionAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """The ledger: append-only."""
 
     list_display = (
@@ -118,7 +117,7 @@ class TransactionAdmin(ViewOnlyAdmin):
 
 
 @admin.register(Transfer)
-class TransferAdmin(ViewOnlyAdmin):
+class TransferAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = ("created_at", "reference", "from_wallet", "to_wallet", "amount_display", "note")
     list_filter = (("created_at", RangeDateFilter),)
     list_filter_submit = True
@@ -198,7 +197,7 @@ class ManualAdjustmentForm(forms.ModelForm):
 
 
 @admin.register(ManualAdjustment)
-class ManualAdjustmentAdmin(ModelAdmin):
+class ManualAdjustmentAdmin(StaffViewAuditMixin, ModelAdmin):
     """Staff top-ups and corrections. Add-only: posted adjustments are never edited or deleted."""
 
     form = ManualAdjustmentForm

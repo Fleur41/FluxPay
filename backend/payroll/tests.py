@@ -16,10 +16,11 @@ from banking.models import Account, Transfer
 from banking.services import open_wallet, transfer_funds
 from fluxpay.testing import funded
 from organizations import services as orgs
-from organizations.models import Membership
+from organizations.models import Membership, Payment
 from platform_settings.models import PlatformSettings
 
-from .models import PayRun, Payslip, Worker
+from . import workers as register
+from .models import PayRun, Worker
 
 User = get_user_model()
 PASSWORD = "Str0ng-Pass!42"
@@ -27,8 +28,8 @@ D = Decimal
 
 
 @funded
-class PayrollTests(APITestCase):
-    """Most tests use the API, the way the app does."""
+class PayrollTestCase(APITestCase):
+    """A business (Kamau Traders) with 50,000 in its cashbook, and five FluxPay users who can become its workers."""
 
     def setUp(self):
         self.owner = User.objects.create_user("owner@kamau.test", PASSWORD, full_name="Grace Kamau")
@@ -61,9 +62,15 @@ class PayrollTests(APITestCase):
         return f"/api/v1/organizations/{self.org.id}/{path}"
 
     def add_workers(self, salary="10000"):
+        """Invites each worker by their FluxPay account, and each accepts in their own app."""
+        membership = Membership.objects.select_related("organization", "user").get(organization=self.org, user=self.owner)
         for wallet in self.workers:
-            res = self.client.post(self.url("workers/"), {"account_number": wallet.account_number, "salary": salary})
-            self.assertEqual(res.status_code, 201, res.data)
+            _worker, code = register.invite(membership=membership, account_number=wallet.account_number,
+                                            salary_amount=salary)  # fmt: skip
+            self.client.force_authenticate(wallet.owner)
+            res = self.client.post("/api/v1/worker-invitations/accept/", {"code": code})
+            self.assertEqual(res.status_code, 200, res.data)
+        self.client.force_authenticate(self.owner)
 
     def create_run(self, title="October salaries"):
         res = self.client.post(self.url("pay-runs/"), {"title": title, "pay_date": business_date().isoformat()})
@@ -74,12 +81,20 @@ class PayrollTests(APITestCase):
         wallet.refresh_from_db()
         return wallet.balance
 
+
+class PayrollTests(PayrollTestCase):
+    """Most tests use the API, the way the app does."""
+
     # Workers
 
-    def test_add_workers_by_account_or_phone_and_import_many(self):
-        res = self.client.post(self.url("workers/"), {"phone_number": "0711000000", "salary": "12,500"})
+    def test_invite_workers_by_account_or_phone_and_import_many(self):
+        res = self.client.post(self.url("workers/"), {"full_name": "Wanjiru", "phone_number": "0711000000",
+                                                      "salary": "12,500"})  # fmt: skip
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertEqual((res.data["name"], res.data["salary"]), ("Worker 0", "12500.00"))
+        self.assertEqual(
+            (res.data["name"], res.data["salary"], res.data["status"], res.data["account_number"], res.data["currency"]),
+            ("Wanjiru", "12500.00", "INVITED", "", "KES"),
+        )
         res = self.client.post(
             self.url("workers/import/"),
             {"rows": [
@@ -92,7 +107,8 @@ class PayrollTests(APITestCase):
         )  # fmt: skip
         self.assertEqual((res.data["created"], len(res.data["errors"])), (2, 2))
         self.assertEqual([e["row"] for e in res.data["errors"]], [3, 4])
-        self.assertEqual(self.client.get(self.url("workers/")).data["count"], 3)
+        self.assertEqual(self.client.get(self.url("workers/")).data["count"], 0)  # nobody has accepted yet
+        self.assertEqual(self.client.get(self.url("workers/"), {"status": "INVITED"}).data["count"], 3)
 
     def test_csv_import(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -105,10 +121,10 @@ class PayrollTests(APITestCase):
         )
         self.assertEqual(res.data, {"created": 5, "updated": 0, "errors": []})
 
-    def test_workers_must_have_a_fluxpay_wallet_and_viewers_cannot_add(self):
+    def test_unknown_accounts_and_viewers_cannot_add(self):
         res = self.client.post(self.url("workers/"), {"account_number": "1234567890", "salary": "100"})
         self.assertEqual(res.status_code, 404)
-        self.assertIn("sign up for FluxPay", res.data["error"]["message"])
+        self.assertIn("No FluxPay personal account", res.data["error"]["message"])
         viewer = self.member("viewer@kamau.test", "Vic Viewer", Membership.Role.VIEWER)
         self.client.force_authenticate(viewer)
         res = self.client.post(self.url("workers/"), {"account_number": self.workers[0].account_number, "salary": "1"})
@@ -126,7 +142,7 @@ class PayrollTests(APITestCase):
         self.assertEqual(res.data["status"], "PAID", res.data)
         self.assertEqual(self.balance(self.business), D("0"))
         self.assertEqual([self.balance(w) for w in self.workers], [D("11000")] * 5)  # 1,000 bonus + 10,000 pay
-        self.assertEqual(Payslip.objects.filter(status="PAID").count(), 5)
+        self.assertEqual(Payment.objects.filter(status="COMPLETED").count(), 5)
         self.assertTrue(AuditEvent.objects.filter(action="payroll.run_paid").exists())
 
     def test_large_pay_run_needs_a_second_person(self):
@@ -142,6 +158,15 @@ class PayrollTests(APITestCase):
         res = self.client.post(self.url(f"pay-runs/{run['id']}/approve/"), {"note": "Checked against timesheets"})
         self.assertEqual(res.data["status"], "PAID")
         self.assertEqual(res.data["decided_by_name"], "Grace Kamau")
+
+    def test_pay_run_explains_approval_and_money_before_sending(self):
+        self.add_workers("20000")  # 100,000 needed, 50,000 held, limit 0
+        run = self.create_run()
+        self.assertEqual((run["approval_threshold"], run["wallet_balance"]), ("0.00", "50000.00"))
+        self.assertEqual(run["other_approvers"], [])  # the owner prepared it; finance can't approve
+        self.client.force_authenticate(self.finance)
+        run = self.create_run("Finance prepared")
+        self.assertEqual(run["other_approvers"], ["Grace Kamau"])
 
     def test_nobody_approves_their_own_pay_run(self):
         self.add_workers()
@@ -160,7 +185,7 @@ class PayrollTests(APITestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn("Add 0.05 first", res.data["error"]["message"])
         self.assertEqual(self.balance(self.business), D("50000"))
-        self.assertFalse(Payslip.objects.filter(status="PAID").exists())
+        self.assertFalse(Payment.objects.filter(status="COMPLETED").exists())
         self.assertEqual(PayRun.objects.get().status, "DRAFT")
 
     def test_draft_amounts_can_be_changed_and_workers_left_out(self):
@@ -206,7 +231,7 @@ class PayrollTests(APITestCase):
         res = self.client.post(self.url(f"payslips/{payslip['id']}/reverse/"), {"reason": "Paid twice in error"})
         self.assertEqual(res.status_code, 400)
         self.assertIn("only has 500.00 KES left", res.data["error"]["message"])
-        self.assertEqual(Payslip.objects.get(id=payslip["id"]).status, "PAID")
+        self.assertEqual(Payment.objects.get(id=payslip["id"]).status, "COMPLETED")
 
     def test_reversal_window_and_who_may_reverse(self):
         run = self.paid_run()
@@ -221,6 +246,80 @@ class PayrollTests(APITestCase):
             res = self.client.post(self.url(f"payslips/{payslip['id']}/reverse/"), {"reason": "Paid in error"})
         self.assertEqual(res.status_code, 400)
         self.assertIn("within 3 days", res.data["error"]["message"])
+
+    def test_cancelled_run_cancels_its_payslips(self):
+        self.add_workers()
+        run = self.create_run()
+        self.client.delete(self.url(f"pay-runs/{run['id']}/"))
+        self.assertEqual(set(Payment.objects.values_list("status", flat=True)), {"CANCELLED"})
+
+    # Payment types
+
+    def test_pay_run_with_an_allowance_on_top_of_salary(self):
+        self.org.approval_threshold = D("1000000")
+        self.org.save()
+        self.add_workers("10000")
+        self.fund_business("3000")
+        run = self.create_run()
+        worker = Worker.objects.get(wallet=self.workers[0])
+        line = {"worker_id": str(worker.id), "amount": "3000", "type": "ALLOWANCE"}
+        res = self.client.post(self.url(f"pay-runs/{run['id']}/payslips/"), line)
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual((res.data["total"], res.data["worker_count"], len(res.data["payslips"])), ("53000.00", 5, 6))
+        again = self.client.post(self.url(f"pay-runs/{run['id']}/payslips/"), line)
+        self.assertEqual(again.data["error"]["code"], "duplicate_payslip")
+
+        res = self.client.post(self.url(f"pay-runs/{run['id']}/submit/"))
+        self.assertEqual(res.data["status"], "PAID", res.data)
+        self.assertEqual(self.balance(self.workers[0]), D("14000"))  # 1,000 bonus + salary + allowance
+        allowance = Payment.objects.get(type="ALLOWANCE")
+        entry = BusinessEntry.objects.get(reference=allowance.reference)
+        self.assertEqual((entry.category.name, entry.source, entry.counterparty), ("Allowances", "PAYROLL", "Worker 0"))
+
+        self.client.force_authenticate(self.workers[0].owner)
+        mine = self.client.get("/api/v1/payslips/").data["results"]
+        self.assertEqual(sorted(p["type_label"] for p in mine), ["Allowance", "Salary"])
+        self.assertEqual({p["status"] for p in mine}, {"PAID"})
+
+    def test_one_off_bonus_to_a_worker(self):
+        self.org.approval_threshold = D("1000000")
+        self.org.save()
+        self.add_workers()
+        worker = Worker.objects.get(wallet=self.workers[0])
+        res = self.client.post(self.url("payments/"), {
+            "type": "BONUS", "worker_id": str(worker.id), "amount": "2500", "note": "Best seller in October",
+            "idempotency_key": "bonus-oct-1",
+        })  # fmt: skip
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual((res.data["status"], res.data["type_label"], res.data["recipient_name"]),
+                         ("COMPLETED", "Bonus", "Worker 0"))  # fmt: skip
+        reference = res.data["reference"]
+        received = self.workers[0].transactions.get(reference=reference)  # one reference on every side
+        self.assertEqual((received.amount, received.description), (D("2500"), "Best seller in October"))
+        self.assertEqual(BusinessEntry.objects.get(reference=reference).category.name, "Bonuses")
+
+        self.client.force_authenticate(self.workers[0].owner)
+        mine = self.client.get("/api/v1/payslips/").data["results"]
+        self.assertEqual([(p["type"], p["title"], p["status"]) for p in mine],
+                         [("BONUS", "Best seller in October", "PAID")])  # fmt: skip
+
+    def test_worker_payments_go_to_this_businesss_workers(self):
+        self.add_workers()
+        res = self.client.post(self.url("payments/"), {"type": "SALARY", "amount": "100", "idempotency_key": "no-worker"})
+        self.assertEqual(res.status_code, 400)
+        worker = Worker.objects.filter(organization=self.org).first()
+        res = self.client.post(self.url("payments/"), {
+            "type": "SUPPLIER", "worker_id": str(worker.id), "destination_account_number": self.workers[0].account_number,
+            "amount": "100", "idempotency_key": "supplier-to-worker",
+        })  # fmt: skip
+        self.assertEqual(res.data["error"]["code"], "worker_not_allowed")
+        other = orgs.create_organization(user=self.finance, name="Other Co")
+        theirs = Worker.objects.create(organization=other, wallet=self.workers[1], user=self.workers[1].owner,
+                                       full_name="Worker 1", status="ACTIVE", salary=D("1"), added_by=self.finance)  # fmt: skip
+        res = self.client.post(self.url("payments/"), {
+            "type": "BONUS", "worker_id": str(theirs.id), "amount": "100", "idempotency_key": "other-worker",
+        })  # fmt: skip
+        self.assertEqual(res.status_code, 404)
 
     def test_workers_see_their_payslips(self):
         run = self.paid_run()
@@ -245,12 +344,16 @@ class PayrollTests(APITestCase):
         entries = res.data["entries"]
         self.assertEqual(
             [(e["direction"], e["amount"], e["category"]["name"]) for e in reversed(entries)],
-            [("IN", "50000.00", "Owner's capital"), ("OUT", "50000.00", "Salaries and wages"),
-             ("IN", "10000.00", "Salaries and wages"), ("IN", "3000.00", "Sales and revenue")],
+            [("IN", "50000.00", "Owner's capital")] + [("OUT", "10000.00", "Salaries and wages")] * 5
+            + [("IN", "10000.00", "Salaries and wages"), ("IN", "3000.00", "Sales and revenue")],
         )  # fmt: skip
         self.assertEqual(entries[0]["balance"], "13000.00")
         self.assertEqual(res.data["closing_balance"], str(self.balance(self.business)))
-        self.assertIn("5 workers", entries[-2]["description"])
+        payroll_lines = [e for e in entries if e["source"] == "PAYROLL"]
+        self.assertEqual(  # one line per worker, carrying the payslip's reference
+            sorted(e["reference"] for e in payroll_lines), sorted(p["reference"] for p in run["payslips"])
+        )
+        self.assertEqual(entries[1]["source"], "PAYROLL_REVERSAL")
 
         res = self.client.get(self.url("books/summary/"))
         pl, bs = res.data["income_statement"], res.data["balance_sheet"]
@@ -296,7 +399,7 @@ class PayrollTests(APITestCase):
         self.addCleanup(conf.update, CELERY_TASK_ALWAYS_EAGER=saved[0], CELERY_TASK_EAGER_PROPAGATES=saved[1])
         with self.captureOnCommitCallbacks(execute=True):
             self.paid_run()
-        pay_refs = Payslip.objects.values_list("transfer__reference", flat=True)
+        pay_refs = Payment.objects.values_list("reference", flat=True)
         alerts = Notification.objects.filter(reference__in=list(pay_refs))
         self.assertEqual(alerts.filter(event="transfer.received").count(), 10)  # email + SMS to each of 5 workers
         self.assertFalse(alerts.filter(event="transfer.sent").exists())  # no flood to the business
@@ -315,14 +418,18 @@ class ScaleTests(APITestCase):
             User(email=f"w{i}@big.test", full_name=f"Worker {i:03d}") for i in range(200)
         )
         wallets = Account.objects.bulk_create(Account(owner=u, currency="KES") for u in users)
-        Worker.objects.bulk_create(Worker(organization=org, wallet=w, salary=D("15000"), added_by=owner) for w in wallets)
+        Worker.objects.bulk_create(
+            Worker(organization=org, wallet=w, user=w.owner, full_name=w.owner.full_name, status="ACTIVE",
+                   salary=D("15000"), added_by=owner)
+            for w in wallets
+        )  # fmt: skip
         from . import services
 
         run = services.create_pay_run(membership=membership, title="Big payroll", pay_date=business_date())
         services.submit_pay_run(membership=membership, run_id=run.id)
         run.refresh_from_db()
         self.assertEqual(run.status, "PAID")
-        self.assertEqual(Payslip.objects.filter(pay_run=run, status="PAID").count(), 200)
+        self.assertEqual(Payment.objects.filter(pay_run=run, status="COMPLETED").count(), 200)
         business.refresh_from_db()
         self.assertEqual(business.balance, D("2000000"))
-        self.assertEqual(BusinessEntry.objects.filter(organization=org, source="PAYROLL").count(), 1)
+        self.assertEqual(BusinessEntry.objects.filter(organization=org, source="PAYROLL").count(), 200)

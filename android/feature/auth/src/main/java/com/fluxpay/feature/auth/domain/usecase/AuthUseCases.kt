@@ -2,6 +2,7 @@ package com.fluxpay.feature.auth.domain.usecase
 
 import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.common.util.isValidEmail
+import com.fluxpay.core.domain.model.LoginResult
 import com.fluxpay.core.domain.model.User
 import com.fluxpay.core.domain.repository.AuthRepository
 import com.fluxpay.feature.auth.domain.model.FieldErrors
@@ -47,8 +48,11 @@ class ValidateCredentialsUseCase @Inject constructor() {
 }
 
 class LoginUseCase @Inject constructor(private val authRepository: AuthRepository) {
-    suspend operator fun invoke(email: String, password: String): NetworkResult<User> =
+    suspend operator fun invoke(email: String, password: String): NetworkResult<LoginResult> =
         authRepository.login(email, password)
+
+    /** The second step, when two-step verification is on. */
+    suspend fun withCode(mfaToken: String, code: String): NetworkResult<User> = authRepository.completeLogin(mfaToken, code)
 }
 
 class RegisterUseCase @Inject constructor(private val authRepository: AuthRepository) {

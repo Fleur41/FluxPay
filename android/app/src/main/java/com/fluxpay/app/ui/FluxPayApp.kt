@@ -34,6 +34,7 @@ import com.fluxpay.feature.auth.navigation.AuthRoutes
 @Composable
 fun FluxPayApp(
     isLoggedIn: Boolean,
+    showBusinessTab: Boolean,
     pendingDeepLink: String?,
     onDeepLinkConsumed: () -> Unit,
     sessionWarningSeconds: Long?,
@@ -77,6 +78,8 @@ fun FluxPayApp(
     }
 
     val showBottomBar = TopLevelDestination.entries.any { it.route == currentDestination?.route }
+    // The Business tab only for people who run a business (see ObserveCanSeeBusinessUseCase).
+    val tabs = TopLevelDestination.entries.filter { it != TopLevelDestination.BUSINESS || showBusinessTab }
 
     Scaffold(
         // Each screen handles its own status-bar inset; this Scaffold only reserves the bottom bar.
@@ -85,7 +88,7 @@ fun FluxPayApp(
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {
-                    TopLevelDestination.entries.forEach { destination ->
+                    tabs.forEach { destination ->
                         val selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true
                         NavigationBarItem(
                             selected = selected,

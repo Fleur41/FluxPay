@@ -35,6 +35,41 @@ data class AuthResponseDto(
     val user: UserDto,
 )
 
+/**
+ * The answer to email + password: the tokens, or (with two-step verification on) a challenge to exchange with a
+ * code at auth/login/mfa/.
+ */
+@JsonClass(generateAdapter = true)
+data class LoginResponseDto(
+    val access: String? = null,
+    val refresh: String? = null,
+    val user: UserDto? = null,
+    @Json(name = "mfa_required") val mfaRequired: Boolean = false,
+    @Json(name = "mfa_token") val mfaToken: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class MfaLoginDto(@Json(name = "mfa_token") val mfaToken: String, val code: String)
+
+@JsonClass(generateAdapter = true)
+data class MfaStatusDto(
+    val enabled: Boolean,
+    val required: Boolean,
+    @Json(name = "recovery_codes_left") val recoveryCodesLeft: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
+data class MfaSetupDto(val secret: String, @Json(name = "otpauth_uri") val otpauthUri: String)
+
+@JsonClass(generateAdapter = true)
+data class MfaCodeDto(val code: String)
+
+@JsonClass(generateAdapter = true)
+data class MfaDisableDto(val password: String, val code: String)
+
+@JsonClass(generateAdapter = true)
+data class RecoveryCodesDto(@Json(name = "recovery_codes") val recoveryCodes: List<String>)
+
 @JsonClass(generateAdapter = true)
 data class RefreshRequestDto(val refresh: String)
 
@@ -158,4 +193,23 @@ data class PlatformConfigDto(
     @Json(name = "statement_max_days") val statementMaxDays: Int,
     @Json(name = "session_timeout_minutes") val sessionTimeoutMinutes: Int,
     @Json(name = "budget_guideline") val budgetGuideline: Map<String, Int>,
+)
+
+/** Sends money from one of the user's wallets to their own M-Pesa number (the one on their profile). */
+@JsonClass(generateAdapter = true)
+data class MpesaWithdrawalDto(
+    @Json(name = "account_id") val accountId: String,
+    val amount: String,
+    @Json(name = "idempotency_key") val idempotencyKey: String,
+)
+
+/** A payment to or from M-Pesa or a bank; it completes later, when the provider confirms it. */
+@JsonClass(generateAdapter = true)
+data class ExternalPaymentDto(
+    val id: String,
+    val status: String,
+    val amount: java.math.BigDecimal,
+    val currency: String,
+    val reference: String,
+    @Json(name = "failure_reason") val failureReason: String? = null,
 )

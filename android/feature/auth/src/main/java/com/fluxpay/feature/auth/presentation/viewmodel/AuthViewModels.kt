@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fluxpay.core.common.result.NetworkResult
+import com.fluxpay.core.domain.model.LoginResult
 import com.fluxpay.core.common.util.isValidEmail
 import com.fluxpay.core.domain.usecase.ObservePlatformConfigUseCase
 import com.fluxpay.core.domain.usecase.RefreshPlatformConfigUseCase
@@ -61,15 +62,42 @@ class LoginViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
             val result = login(current.email, current.password)
+            val needsCode = ((result as? NetworkResult.Success)?.data as? LoginResult.NeedsCode)?.mfaToken
             _state.update {
                 it.copy(
                     isLoading = false,
                     password = if (result is NetworkResult.Success) "" else it.password,
                     errorMessage = (result as? NetworkResult.Error)?.message,
+                    mfaToken = needsCode,
+                    code = "",
                 )
             }
         }
     }
+
+    fun onCodeChange(value: String) = _state.update { it.copy(code = value.take(20), errorMessage = null) }
+
+    /** Sends the authenticator (or recovery) code; signing in then completes like a normal login. */
+    fun submitCode() {
+        val current = _state.value
+        val token = current.mfaToken ?: return
+        if (current.isLoading || current.code.isBlank()) return
+        _state.update { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            val result = login.withCode(token, current.code)
+            _state.update {
+                when {
+                    result is NetworkResult.Success -> it.copy(isLoading = false, mfaToken = null, code = "")
+                    // The challenge lasts a few minutes: after that, start again from the password.
+                    (result as? NetworkResult.Error)?.code == "mfa_challenge_expired" ->
+                        it.copy(isLoading = false, mfaToken = null, code = "", errorMessage = result.message)
+                    else -> it.copy(isLoading = false, code = "", errorMessage = (result as? NetworkResult.Error)?.message)
+                }
+            }
+        }
+    }
+
+    fun cancelCode() = _state.update { it.copy(mfaToken = null, code = "", errorMessage = null) }
 }
 
 @HiltViewModel
