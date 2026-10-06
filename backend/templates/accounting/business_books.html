@@ -20,6 +20,12 @@
     <div class="border border-base-200 dark:border-base-800 rounded-default p-5"><div class="note">{% if pl.profit >= 0 %}Profit{% else %}Loss{% endif %} for the period</div><div class="text-xl font-semibold">{{ pl.profit|amount }}</div><div class="note">{{ workers }} worker{{ workers|pluralize }} on payroll</div></div>
 </div>
 
+<div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-3">
+    <div class="report-head"><div><h2 class="text-xl font-semibold text-important">Reconciliation</h2><div class="note">Wallet {{ check.balances.wallet }} · ledger {{ check.balances.ledger }} · cashbook {{ check.balances.cashbook }} · {{ check.checked.movements }} movements, {{ check.checked.cashbook_lines }} cashbook lines, {{ check.checked.payments }} payments checked</div></div>{% if check.balanced %}<span class="pill ok">Everything matches</span>{% else %}<span class="pill bad">{{ check.problems|length }} problem{{ check.problems|length|pluralize }}</span>{% endif %}</div>
+    {% for p in check.problems %}<div class="text-red-600">{{ p.message }}{% if p.reference %} <span class="note">· {{ p.reference }}</span>{% endif %}</div>{% endfor %}
+    {% for a in check.attention %}<div>{{ a.message }}{% if a.reference %} <span class="note">· {{ a.reference }}</span>{% endif %}</div>{% endfor %}
+</div>
+
 <div class="border border-base-200 dark:border-base-800 rounded-default p-6 flex flex-col gap-4">
     <div class="report-head"><div><h2 class="text-xl font-semibold text-important">Cashbook – {{ organization.name }}</h2><div class="note">FluxPay wallet {{ wallet.account_number }} · {{ start|date:"j M Y" }} to {{ end|date:"j M Y" }} · the balance always equals the wallet</div></div></div>
     <div class="scroll"><table class="fin">
@@ -52,6 +58,11 @@
             <tr class="section"><td colspan="3">Assets</td></tr>
             {% for r in bs.assets.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
             <tr class="subtotal"><td></td><td>Total assets</td><td class="num">{{ bs.assets.total|amount }}</td></tr>
+            {% if bs.liabilities.rows %}
+            <tr class="section"><td colspan="3">Liabilities</td></tr>
+            {% for r in bs.liabilities.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
+            <tr class="subtotal"><td></td><td>Total liabilities</td><td class="num">{{ bs.liabilities.total|amount }}</td></tr>
+            {% endif %}
             <tr class="section"><td colspan="3">Equity</td></tr>
             {% for r in bs.equity.rows %}<tr class="row"><td class="code">{{ r.account.code }}</td><td class="indent">{{ r.account.name }}</td><td class="num">{{ r.amount|amount }}</td></tr>{% endfor %}
             {% for name, value in bs.equity.extra %}<tr class="row"><td></td><td class="indent">{{ name }}</td><td class="num">{{ value|amount }}</td></tr>{% endfor %}

@@ -48,6 +48,38 @@ class WorkerLifecycleTests(PayrollTestCase):
         self.assertEqual(Worker.objects.get(id=worker["id"]).name, "Worker 3")  # their own name from now on
 
     @mock.patch("payroll.workers.get_sms_backend")
+    def test_invited_by_email_only_then_accepted(self, sms):
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.url("workers/"), {"salary": "10000", "full_name": "Achieng Otieno",
+                                                          "email": "Achieng@Example.org"})  # fmt: skip
+        self.assertEqual(res.status_code, 201, res.data)
+        sms.return_value.send.assert_not_called()
+        body = mail.outbox[0].body
+        self.assertEqual(mail.outbox[0].to, ["achieng@example.org"])
+        self.assertIn("Join a business", body)
+        code = re.search(r"Your invitation code: ([0-9A-Z]{5}-[0-9A-Z]{5})", body).group(1)
+        self.as_worker(3)
+        accepted = self.client.post("/api/v1/worker-invitations/accept/", {"code": code})
+        self.assertEqual(accepted.data["status"], "ACTIVE")
+
+    def test_email_invitation_needs_a_name_and_isnt_sent_twice(self):
+        res = self.client.post(self.url("workers/"), {"salary": "10000", "email": "a@example.org"})
+        self.assertEqual(res.status_code, 400)
+        self.client.post(self.url("workers/"), {"salary": "10000", "full_name": "A", "email": "a@example.org"})
+        again = self.client.post(self.url("workers/"), {"salary": "10000", "full_name": "A", "email": "A@example.org"})
+        self.assertEqual(again.data["error"]["code"], "already_invited")
+
+    @mock.patch("payroll.workers.get_sms_backend")
+    def test_email_still_goes_out_when_the_sms_provider_fails(self, sms):
+        from notifications.sms import SmsError
+
+        sms.return_value.send.side_effect = SmsError("401 Unauthorized")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(self.url("workers/"), {"salary": "10000", "full_name": "Baraka",
+                                                    "phone_number": "0711000004", "email": "b@example.org"})  # fmt: skip
+        self.assertEqual(mail.outbox[0].to, ["b@example.org"])
+
+    @mock.patch("payroll.workers.get_sms_backend")
     def test_an_invitation_to_an_account_is_for_that_person_only_and_expires(self, sms):
         _worker, code = self.invite(sms, account_number=self.workers[0].account_number)
         self.as_worker(1)

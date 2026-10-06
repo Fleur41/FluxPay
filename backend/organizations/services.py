@@ -39,6 +39,8 @@ from .models import Beneficiary, Invitation, Membership, Organization, Payment
 from .roles import Perm, Role, can_manage, has_perm
 
 P = Payment.Status
+# Looking, not acting: allowed without two-step verification.
+READ_ONLY = {Perm.VIEW, Perm.VIEW_AUDIT}
 
 
 # --- Access -------------------------------------------------------------------------------------
@@ -60,6 +62,18 @@ def membership_for(user, organization_id, perm: Perm) -> Membership:
         raise BusinessError("Your role doesn't allow this.", "permission_denied", status.HTTP_403_FORBIDDEN)
     if perm != Perm.VIEW and membership.organization.status != Organization.Status.ACTIVE:
         raise BusinessError("This business is suspended.", "organization_suspended", status.HTTP_403_FORBIDDEN)
+    if (
+        perm not in READ_ONLY
+        and membership.role in (Role.OWNER, Role.ADMIN)
+        and settings.FLUXPAY_REQUIRE_BUSINESS_MFA
+        and not user.mfa_enabled
+    ):
+        # Owners and admins can move the business's money and change who it pays: a password alone isn't enough.
+        raise BusinessError(
+            "Turn on two-step verification (Settings > Security) to manage this business.",
+            "mfa_required",
+            status.HTTP_403_FORBIDDEN,
+        )
     return membership
 
 
@@ -79,6 +93,63 @@ def create_organization(*, user, name: str, registration_number: str = "", curre
     )
     record("org.created", actor=user, organization_id=organization.id, target=organization, metadata={"name": name})
     return organization
+
+
+def onboard_business(*, staff, name: str, owner_email: str, owner_name: str, owner_phone: str = "",
+                     registration_number: str = "") -> tuple[Organization, bool]:  # fmt: skip
+    """FluxPay staff set up a business for its owner. Returns (business, owner_is_new).
+
+    A new owner gets a FluxPay account (and personal wallet) with no password, and an email with a link to set
+    one; someone who already uses FluxPay just finds the business in their app. Recorded as done by staff.
+    """
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.encoding import force_bytes
+    from django.utils.http import urlsafe_base64_encode
+
+    from banking.services import open_wallet
+
+    User = get_user_model()
+    name, owner_email, owner_name = name.strip(), owner_email.strip().lower(), owner_name.strip()
+    if not name:
+        raise BusinessError("Give the business a name.", "name_required")
+    if Organization.objects.filter(name__iexact=name).exists():
+        raise BusinessError(f"There is already a business called {name}.", "duplicate_business")
+    with db_transaction.atomic():
+        owner = User.objects.filter(email__iexact=owner_email).first()
+        is_new = owner is None
+        if is_new:
+            if not owner_name:
+                raise BusinessError("Give the owner's full name.", "owner_name_required")
+            owner = User.objects.create_user(owner_email, None, full_name=owner_name, phone_number=owner_phone.strip())
+            open_wallet(owner)
+        elif not owner.is_active:
+            raise BusinessError("That person's FluxPay account is disabled.", "owner_inactive")
+        elif owner.is_staff:
+            raise BusinessError("FluxPay staff accounts can't own a business.", "owner_is_staff")
+        organization = create_organization(user=owner, name=name, registration_number=registration_number.strip())
+        record("org.onboarded", actor=staff, organization_id=organization.id, target=organization,
+               metadata={"name": name, "owner": owner.email, "new_owner": is_new, "by_staff": True})  # fmt: skip
+        # A new owner, or one onboarded before who never chose a password, needs the link to choose one.
+        if not owner.has_usable_password():
+            link = settings.PASSWORD_RESET_LINK.format(
+                uid=urlsafe_base64_encode(force_bytes(owner.pk)), token=default_token_generator.make_token(owner)
+            )
+            body = (f"Hi {owner.full_name},\n\nFluxPay has set up {name} for you. Open this link to choose your "
+                    f"password:\n{link}\n\nThen install the FluxPay app and sign in with {owner.email}. Your "
+                    f"business is under the Business tab, where you can pay workers and suppliers and keep its "
+                    f"books.")  # fmt: skip
+        else:
+            body = (f"Hi {owner.full_name},\n\nFluxPay has set up {name} for you. Open the FluxPay app, sign in "
+                    f"with {owner.email} and go to the Business tab to start paying workers and suppliers and keeping "
+                    f"its books.\n\nForgot your password? Tap \"Forgot password?\" on the sign-in screen.")  # fmt: skip
+        email = owner.email
+        db_transaction.on_commit(
+            lambda: send_mail(subject=f"{name} is ready on FluxPay", message=body, from_email=None,
+                              recipient_list=[email], fail_silently=True),
+            robust=True,
+        )
+    return organization, is_new
 
 
 def update_settings(*, membership: Membership, **changes) -> Organization:
@@ -611,7 +682,7 @@ def _send_invitation(organization, inviter, email: str, role: str, link: str) ->
         subject=f"You're invited to {organization.name} on FluxPay",
         message=(
             f"{inviter.full_name} invited you to join {organization.name} on FluxPay as {role.lower()}.\n\n"
-            f"Open this link on your phone to accept (it expires in {days} days):\n{link}\n"
+            f"Open this link to accept it in the FluxPay app, signed in as {email} (it expires in {days} days):\n{link}\n"
         ),
         from_email=None,
         recipient_list=[email],

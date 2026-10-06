@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.outlined.CallReceived
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,6 +50,7 @@ import java.time.LocalTime
 @Composable
 fun DashboardScreen(
     onSendMoney: () -> Unit,
+    onSendToMpesa: () -> Unit,
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
     onOpenBudget: () -> Unit,
@@ -137,6 +139,7 @@ fun DashboardScreen(
                 QuickActionsRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { weight ->
                     QuickAction(Icons.AutoMirrored.Outlined.Send, "Send", onSendMoney, weight)
                     QuickAction(Icons.AutoMirrored.Outlined.CallReceived, "Receive", { showReceive = true }, weight)
+                    QuickAction(Icons.Outlined.PhoneAndroid, "M-Pesa", onSendToMpesa, weight)
                     QuickAction(Icons.Outlined.History, "History", onSeeAllTransactions, weight)
                 }
             }

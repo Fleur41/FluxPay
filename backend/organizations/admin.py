@@ -1,13 +1,39 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.contrib.filters.admin import RangeDateFilter
 from unfold.decorators import display
+from unfold.widgets import UnfoldAdminEmailInputWidget, UnfoldAdminTextInputWidget
 
 from audit.services import record
-from fluxpay.admin_base import ViewOnlyAdmin
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin
+from fluxpay.exceptions import BusinessError
 
+from . import services
 from .models import Beneficiary, Invitation, Membership, Organization, Payment
+
+
+class OnboardBusinessForm(forms.Form):
+    name = forms.CharField(label="Business name", max_length=150, widget=UnfoldAdminTextInputWidget)
+    registration_number = forms.CharField(
+        label="Registration number", max_length=50, required=False, widget=UnfoldAdminTextInputWidget,
+        help_text="From the Business Registration Service, if they have one.",
+    )  # fmt: skip
+    owner_name = forms.CharField(label="Owner's full name", max_length=150, widget=UnfoldAdminTextInputWidget)
+    owner_email = forms.EmailField(
+        label="Owner's email", widget=UnfoldAdminEmailInputWidget,
+        help_text="If they already use FluxPay, the business is added to that account. Otherwise they get an email "
+                  "to set their password.",
+    )  # fmt: skip
+    owner_phone = forms.CharField(
+        label="Owner's phone", max_length=20, required=False, widget=UnfoldAdminTextInputWidget,
+        help_text="Their M-Pesa number, e.g. 0712 345 678.",
+    )  # fmt: skip
 
 
 class MembershipInline(TabularInline):
@@ -24,7 +50,7 @@ class MembershipInline(TabularInline):
 
 
 @admin.register(Organization)
-class OrganizationAdmin(ModelAdmin):
+class OrganizationAdmin(StaffViewAuditMixin, ModelAdmin):
     """Staff may suspend or reactivate a business (audited); owners manage everything else in the app."""
 
     list_display = ("name", "registration_number", "status_label", "approval_threshold", "members", "workers",
@@ -38,7 +64,42 @@ class OrganizationAdmin(ModelAdmin):
     radio_fields = {"status": admin.HORIZONTAL}
 
     def has_add_permission(self, request):
-        return False  # businesses are created by customers in the app
+        return request.user.has_perm("organizations.add_organization")
+
+    def add_view(self, request, form_url="", extra_context=None):
+        return HttpResponseRedirect(reverse("admin:organizations_organization_onboard"))
+
+    def get_urls(self):
+        return [
+            path("onboard/", self.admin_site.admin_view(self.onboard_view), name="organizations_organization_onboard"),
+        ] + super().get_urls()
+
+    def onboard_view(self, request):
+        """Staff set up a business and its owner; the owner is emailed (see services.onboard_business)."""
+        if not request.user.has_perm("organizations.add_organization"):
+            raise PermissionDenied
+        form = OnboardBusinessForm(request.POST or None)
+        if request.method == "POST" and form.is_valid():
+            try:
+                organization, is_new = services.onboard_business(staff=request.user, **form.cleaned_data)
+            except BusinessError as exc:
+                messages.error(request, str(exc.detail))
+            else:
+                owner = form.cleaned_data["owner_email"]
+                messages.success(
+                    request,
+                    f"{organization.name} is ready. {owner} was emailed a link to set their password and sign in."
+                    if is_new else f"{organization.name} is ready and was added to {owner}'s FluxPay account.",
+                )
+                return HttpResponseRedirect(reverse("admin:organizations_organization_change", args=[organization.pk]))
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Onboard a business",
+            "form": form,
+            "back": reverse("admin:organizations_organization_changelist"),
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(request, "admin/organizations/onboard.html", context)
 
     def has_delete_permission(self, request, obj=None):
         return False
@@ -79,7 +140,7 @@ class OrganizationAdmin(ModelAdmin):
 
 
 @admin.register(Payment)
-class PaymentAdmin(ViewOnlyAdmin):
+class PaymentAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = (
         "created_at",
         "organization",
@@ -115,7 +176,7 @@ class PaymentAdmin(ViewOnlyAdmin):
 
 
 @admin.register(Beneficiary)
-class BeneficiaryAdmin(ViewOnlyAdmin):
+class BeneficiaryAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """Businesses manage their own beneficiaries in the app; staff can look them up here."""
 
     list_display = ("name", "organization", "kind", "method", "verified", "is_active", "details_changed_at")
@@ -131,7 +192,7 @@ class BeneficiaryAdmin(ViewOnlyAdmin):
 
 
 @admin.register(Invitation)
-class InvitationAdmin(ViewOnlyAdmin):
+class InvitationAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = ("created_at", "email", "organization", "role", "state", "expires_at")
     list_filter = ("role",)
     search_fields = ("email", "organization__name")

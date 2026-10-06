@@ -22,8 +22,20 @@ urlpatterns = [
     path(ORG + "payslips/<uuid:payslip_id>/reverse/", views.PayslipReverseView.as_view(), name="org-payslip-reverse"),
     path(ORG + "books/cashbook/", views.CashbookView.as_view(), name="org-books-cashbook"),
     path(ORG + "books/summary/", views.BooksSummaryView.as_view(), name="org-books-summary"),
+    path(ORG + "books/reconciliation/", views.ReconciliationView.as_view(), name="org-books-reconciliation"),
     path(ORG + "books/categories/", views.CategoryListCreateView.as_view(), name="org-books-categories"),
     path(ORG + "books/entries/<uuid:entry_id>/", views.BookEntryView.as_view(), name="org-books-entry"),
+    path(ORG + "books/invoices/", views.InvoiceListCreateView.as_view(), name="org-books-invoices"),
+    path(ORG + "books/invoices/<uuid:invoice_id>/", views.InvoiceDetailView.as_view(), name="org-books-invoice"),
+    path(
+        ORG + "books/invoices/<uuid:invoice_id>/payable-entries/",
+        views.InvoicePayableEntriesView.as_view(),
+        name="org-books-invoice-entries",
+    ),
+    path(ORG + "books/invoices/<uuid:invoice_id>/pay/", views.InvoicePayView.as_view(), name="org-books-invoice-pay"),
+    path(
+        ORG + "books/invoices/<uuid:invoice_id>/cancel/", views.InvoiceCancelView.as_view(), name="org-books-invoice-cancel"
+    ),
     path("payslips/", views.MyPayslipListView.as_view(), name="my-payslips"),
     path("worker-invitations/preview/", views.InvitationPreviewView.as_view(), name="worker-invitation-preview"),
     path("worker-invitations/accept/", views.InvitationAcceptView.as_view(), name="worker-invitation-accept"),

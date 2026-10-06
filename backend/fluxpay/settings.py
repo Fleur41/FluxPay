@@ -4,9 +4,11 @@ FluxPay backend settings.
 All environment-specific values are read from environment variables so the
 same code runs locally (dev), on staging and in production.
 """
+import base64
+import hashlib
+import os
 from datetime import timedelta
 from pathlib import Path
-import os
 
 import dj_database_url
 
@@ -67,6 +69,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "audit.middleware.AuditContextMiddleware",
+    "users.middleware.StaffMfaMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -151,6 +154,7 @@ REST_FRAMEWORK = {
         "deposits": "10/min",
         "statements": "10/min",
         "worker_codes": "30/hour",  # entering invitation and join codes
+        "mfa": "10/min",  # two-step verification codes at sign-in
     },
     "EXCEPTION_HANDLER": "fluxpay.exceptions.api_exception_handler",
 }
@@ -166,16 +170,45 @@ SIMPLE_JWT = {
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 
-# Email (password reset links). Console backend prints emails in dev.
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "FluxPay <no-reply@fluxpay.app>")
-# Deep link the Android app opens (handled by MainActivity).
-PASSWORD_RESET_LINK = os.environ.get("PASSWORD_RESET_LINK", "fluxpay://reset-password?uid={uid}&token={token}")
-# Deep link in business invitation emails.
-ORG_INVITE_LINK = os.environ.get("ORG_INVITE_LINK", "fluxpay://join-business?token={token}")
-# Deep links for workers: a personal invitation (SMS/email), and a business's join code (shown as a QR code).
-WORKER_INVITE_LINK = os.environ.get("WORKER_INVITE_LINK", "fluxpay://join-employer?code={code}")
+# Email (alerts, invitations, password resets). Printed to the log until an SMTP server is set: then sent for real.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", EMAIL_PORT == 587)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", EMAIL_PORT == 465)
+EMAIL_TIMEOUT = 20
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    # Real SMTP, but test addresses (*.test, example.com...) are only printed, so seed data doesn't bounce.
+    "notifications.email.SmtpExceptTestAddressesBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend",
+)
+# Most providers only accept mail "from" the account you sign in with (e.g. your Gmail address).
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL", f"FluxPay <{EMAIL_HOST_USER}>" if EMAIL_HOST_USER else "FluxPay <no-reply@fluxpay.app>"
+)
+# Links in emails and SMS are ordinary web links to this server (fluxpay/web.py), so they open anywhere: a page
+# that resets the password in the browser, or shows the invitation code with an "Open in the FluxPay app" button.
+# In development, http://localhost:8000 also works on a phone connected with `adb reverse tcp:8000 tcp:8000`.
+FLUXPAY_WEB_URL = os.environ.get("FLUXPAY_WEB_URL", "http://localhost:8000" if DEBUG else "https://fluxpay.app").rstrip("/")
+PASSWORD_RESET_LINK = os.environ.get("PASSWORD_RESET_LINK", FLUXPAY_WEB_URL + "/reset-password?uid={uid}&token={token}")
+# Team invitations (admin, finance, viewer).
+ORG_INVITE_LINK = os.environ.get("ORG_INVITE_LINK", FLUXPAY_WEB_URL + "/join-business?token={token}")
+# Workers: a personal invitation (SMS/email), and a business's join code (shown as a QR code the app scans).
+WORKER_INVITE_LINK = os.environ.get("WORKER_INVITE_LINK", FLUXPAY_WEB_URL + "/join?code={code}")
 WORKER_JOIN_LINK = os.environ.get("WORKER_JOIN_LINK", "fluxpay://join-employer?business={code}")
+
+# Two-step verification (users.mfa). The key encrypts authenticator secrets: a Fernet key
+# (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"). Set it in production;
+# without it one is derived from DJANGO_SECRET_KEY, and changing that key would then turn everyone's codes off.
+FLUXPAY_MFA_KEY = os.environ.get("FLUXPAY_MFA_KEY") or base64.urlsafe_b64encode(
+    hashlib.sha256(f"fluxpay-mfa:{SECRET_KEY}".encode()).digest()
+).decode()
+# Staff must pass two-step verification before using the back office; business owners and admins before
+# doing anything with a business beyond looking at it.
+FLUXPAY_REQUIRE_STAFF_MFA = env_bool("FLUXPAY_REQUIRE_STAFF_MFA", True)
+FLUXPAY_REQUIRE_BUSINESS_MFA = env_bool("FLUXPAY_REQUIRE_BUSINESS_MFA", True)
+TEST_RUNNER = "fluxpay.test_runner.FluxPayTestRunner"
 
 # External payments (payments app)
 # Rail -> provider adapter class. A rail is enabled below once it is configured; the fake one exists only in tests.
@@ -205,6 +238,10 @@ MPESA_INITIATOR_NAME = os.environ.get("MPESA_INITIATOR_NAME", "")
 MPESA_SECURITY_CREDENTIAL = os.environ.get("MPESA_SECURITY_CREDENTIAL", "")
 if all((MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_PASSKEY, FLUXPAY_PUBLIC_URL)):
     FLUXPAY_PAYMENT_PROVIDERS["MPESA"] = "payments.providers.mpesa.MpesaProvider"
+elif DEBUG and env_bool("FLUXPAY_FAKE_MPESA", True):
+    # Local development without Daraja keys: M-Pesa deposits and withdrawals are accepted and succeed at the
+    # next status check (resolve-stuck-payments), so the whole flow can be tried. Never with DEBUG off.
+    FLUXPAY_PAYMENT_PROVIDERS["MPESA"] = "payments.providers.fake.FakeProvider"
 # Bank payouts are sent by FluxPay staff from the bank and confirmed in the admin (there is no bank API).
 # Only switch this on when someone works the queue.
 if env_bool("FLUXPAY_BANK_PAYOUTS", DEBUG):

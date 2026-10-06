@@ -12,8 +12,9 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounting import business as books
-from accounting import reports
-from accounting.models import BusinessEntry, LedgerAccount
+from accounting import invoices, reports
+from accounting.business_reconciliation import reconcile as reconcile_business
+from accounting.models import BusinessEntry, Invoice, LedgerAccount
 from accounting.services import business_date
 from banking.models import Account
 from fluxpay.exceptions import BusinessError
@@ -31,6 +32,10 @@ from .serializers import (
     CategorySerializer,
     CodeSerializer,
     EmployerSerializer,
+    InvoiceCancelSerializer,
+    InvoiceCreateSerializer,
+    InvoicePaySerializer,
+    InvoiceSerializer,
     MyPayslipSerializer,
     PayRunCreateSerializer,
     PayRunDetailSerializer,
@@ -441,6 +446,14 @@ class CategoryListCreateView(OrgScopedMixin, APIView):
         return Response(CategorySerializer(account).data, status=status.HTTP_201_CREATED)
 
 
+class ReconciliationView(OrgScopedMixin, APIView):
+    """GET .../books/reconciliation/ — do the cashbook, ledger, payments and payouts all match? (see
+    accounting.business_reconciliation). Members who can see the books can see this."""
+
+    def get(self, request, org_id):
+        return Response(reconcile_business(self.membership.organization))
+
+
 class BookEntryView(OrgScopedMixin, APIView):
     perm = Perm.INITIATE_PAYMENT
 
@@ -456,3 +469,82 @@ class BookEntryView(OrgScopedMixin, APIView):
         entry = books.reclassify(entry=entry, new_category=category, actor=request.user,
                                  note=serializer.validated_data["note"])  # fmt: skip
         return Response(BookEntrySerializer(entry).data)
+
+
+# --- Bills (payables) and invoices (receivables) ---------------------------------------------------
+
+
+class InvoiceListCreateView(WritesNeedPayments, APIView):
+    """GET .../books/invoices/?kind=BILL|INVOICE&open=1 — with what's still owed each way.
+    POST — records a bill or invoice (owners, admins, finance)."""
+
+    def get(self, request, org_id):
+        organization = self.membership.organization
+        wallet = _wallet(self.membership)
+        items = Invoice.objects.filter(organization=organization).select_related("category", "created_by")
+        kind = request.query_params.get("kind")
+        if kind in Invoice.Kind.values:
+            items = items.filter(kind=kind)
+        if request.query_params.get("open"):
+            items = items.filter(status__in=(Invoice.Status.OPEN, Invoice.Status.PART_PAID))
+        totals = {k: str(v) for k, v in invoices.totals(organization, wallet.currency).items()}
+        return Response({"currency": wallet.currency, "totals": totals,
+                         "results": InvoiceSerializer(items[:200], many=True).data})  # fmt: skip
+
+    def post(self, request, org_id):
+        serializer = InvoiceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        wallet = _wallet(self.membership)
+        category = LedgerAccount.objects.filter(id=data["category_id"], organization_id=org_id).first()
+        if category is None:
+            raise BusinessError("Category not found.", "not_found", status.HTTP_404_NOT_FOUND)
+        invoice = invoices.create(
+            organization=self.membership.organization, kind=data["kind"], party=data["party"], amount=data["amount"],
+            category=category, currency=wallet.currency, actor=request.user, description=data["description"],
+            issue_date=data["issue_date"], due_date=data["due_date"],
+        )  # fmt: skip
+        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+class InvoiceMixin(WritesNeedPayments):
+    def invoice(self, invoice_id) -> Invoice:
+        invoice = Invoice.objects.filter(id=invoice_id, organization_id=self.membership.organization_id).first()
+        if invoice is None:
+            raise BusinessError("Bill or invoice not found.", "not_found", status.HTTP_404_NOT_FOUND)
+        return invoice
+
+
+class InvoiceDetailView(InvoiceMixin, APIView):
+    def get(self, request, org_id, invoice_id):
+        return Response(InvoiceSerializer(self.invoice(invoice_id)).data)
+
+
+class InvoicePayableEntriesView(InvoiceMixin, APIView):
+    """GET — the cashbook entries that could pay this bill (or collect this invoice), newest first."""
+
+    def get(self, request, org_id, invoice_id):
+        entries = invoices.payable_entries(self.invoice(invoice_id))[:50]
+        return Response(BookEntrySerializer(entries, many=True).data)
+
+
+class InvoicePayView(InvoiceMixin, APIView):
+    """POST {entry_id} — this cashbook entry pays the bill (or collects the invoice)."""
+
+    def post(self, request, org_id, invoice_id):
+        serializer = InvoicePaySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice = self.invoice(invoice_id)
+        entry = BusinessEntry.objects.filter(id=serializer.validated_data["entry_id"], organization_id=org_id).first()
+        if entry is None:
+            raise BusinessError("Cashbook entry not found.", "entry_not_found", status.HTTP_404_NOT_FOUND)
+        return Response(InvoiceSerializer(invoices.pay(invoice=invoice, entry=entry, actor=request.user)).data)
+
+
+class InvoiceCancelView(InvoiceMixin, APIView):
+    def post(self, request, org_id, invoice_id):
+        serializer = InvoiceCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice = invoices.cancel(invoice=self.invoice(invoice_id), actor=request.user,
+                                  reason=serializer.validated_data["reason"])  # fmt: skip
+        return Response(InvoiceSerializer(invoice).data)

@@ -4,14 +4,14 @@ from unfold.admin import TabularInline
 from unfold.contrib.filters.admin import RangeDateFilter
 from unfold.decorators import display
 
-from fluxpay.admin_base import ViewOnlyAdmin, admin_link, money
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin, admin_link, money
 from organizations.models import Payment
 
 from .models import PayRun, Worker
 
 
 @admin.register(Worker)
-class WorkerAdmin(ViewOnlyAdmin):
+class WorkerAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """Businesses manage their own workers in the app; staff can look them up here."""
 
     list_display = ("name", "business", "wallet_link", "job_title", "salary_display", "status_label", "created_at")
@@ -82,7 +82,7 @@ class PayslipInline(TabularInline):
 
 
 @admin.register(PayRun)
-class PayRunAdmin(ViewOnlyAdmin):
+class PayRunAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     list_display = ("title", "business", "pay_date", "status_label", "workers", "total_display", "reversed",
                     "paid_at")  # fmt: skip
     list_filter = ("status", "organization", ("pay_date", RangeDateFilter))

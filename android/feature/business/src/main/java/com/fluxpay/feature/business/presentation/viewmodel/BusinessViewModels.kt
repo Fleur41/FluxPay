@@ -8,17 +8,26 @@ import com.fluxpay.core.domain.model.BookCategory
 import com.fluxpay.core.domain.model.BookEntry
 import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.Business
+import com.fluxpay.core.domain.model.BusinessPayment
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
 import com.fluxpay.core.domain.model.Employer
 import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.Invoice
+import com.fluxpay.core.domain.model.Invoices
 import com.fluxpay.core.domain.model.JoinCode
+import com.fluxpay.core.domain.model.Member
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.PayRun
 import com.fluxpay.core.domain.model.PayRunStatus
+import com.fluxpay.core.domain.model.PayoutMethod
 import com.fluxpay.core.domain.model.Payslip
+import com.fluxpay.core.domain.model.Supplier
+import com.fluxpay.core.domain.model.TeamInvitation
+import com.fluxpay.core.domain.model.TeamRole
 import com.fluxpay.core.domain.model.Worker
 import com.fluxpay.core.domain.model.WorkerStatus
+import com.fluxpay.core.domain.repository.AuthRepository
 import com.fluxpay.core.domain.repository.BusinessRepository
 import com.fluxpay.feature.business.navigation.BusinessRoutes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,6 +39,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -103,6 +113,18 @@ data class BusinessHome(
     val payRuns: List<PayRun>,
     /** Workers who asked to join with the join code and are waiting for an owner or admin. */
     val joinRequests: Int = 0,
+    /** An owner or admin without two-step verification: they can look, but not act, until it's on. */
+    val needsTwoStep: Boolean = false,
+    /** What a month's salaries come to, at each active worker's usual pay. */
+    val monthlyPayroll: java.math.BigDecimal = java.math.BigDecimal.ZERO,
+    /** This month so far; null if it couldn't be loaded (the rest of the page still shows). */
+    val month: BooksSummary? = null,
+    val monthMoneyIn: java.math.BigDecimal? = null,
+    val monthMoneyOut: java.math.BigDecimal? = null,
+    val recent: List<BookEntry> = emptyList(),
+    val owed: Invoices? = null,
+    val paymentsToApprove: Int = 0,
+    val suppliersToCheck: Int = 0,
 ) {
     val waitingForApproval: Int get() = payRuns.count { it.status == PayRunStatus.PENDING_APPROVAL }
 }
@@ -118,6 +140,7 @@ private suspend fun BusinessRepository.business(id: String): NetworkResult<Busin
 class BusinessHomeViewModel @Inject constructor(
     savedState: SavedStateHandle,
     repository: BusinessRepository,
+    private val auth: AuthRepository,
 ) : BaseBusinessViewModel<BusinessHome>(repository) {
     val businessId: String = checkNotNull(savedState[BusinessRoutes.BUSINESS_ID])
 
@@ -136,7 +159,184 @@ class BusinessHomeViewModel @Inject constructor(
             val rs = runs.await().orFail() ?: return@launch
             val active = ws.count { it.status == WorkerStatus.ACTIVE }
             val requests = ws.count { it.status == WorkerStatus.PENDING_ACTIVATION }
-            _state.update { it.copy(data = BusinessHome(b, w, active, rs, requests), loading = false) }
+            val mfa = (auth.mfaStatus() as? NetworkResult.Success)?.data
+            val needsTwoStep = b.canApprove && mfa != null && mfa.required && !mfa.enabled
+            val payroll = ws.filter { it.status == WorkerStatus.ACTIVE }
+                .fold(java.math.BigDecimal.ZERO) { sum, worker -> sum + (worker.salary ?: java.math.BigDecimal.ZERO) }
+            val home = BusinessHome(b, w, active, rs, requests, needsTwoStep, payroll)
+            _state.update { it.copy(data = it.data?.let { old -> extras(old, home) } ?: home, loading = false) }
+            loadExtras(home)
+        }
+    }
+
+    /** The dashboard's figures: optional, so a slow or failing one never blanks the page. */
+    private fun extras(from: BusinessHome, into: BusinessHome) = into.copy(
+        month = from.month, monthMoneyIn = from.monthMoneyIn, monthMoneyOut = from.monthMoneyOut, recent = from.recent,
+        owed = from.owed, paymentsToApprove = from.paymentsToApprove, suppliersToCheck = from.suppliersToCheck,
+    )
+
+    private fun loadExtras(home: BusinessHome) {
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            val start = today.withDayOfMonth(1).toString()
+            val summary = async { repository.summary(businessId, start, today.toString()) }
+            val cashbook = async { repository.cashbook(businessId, start, today.toString()) }
+            val owed = async { repository.invoices(businessId, openOnly = true) }
+            val payments = async { repository.businessPayments(businessId) }
+            val suppliers = async { repository.suppliers(businessId) }
+            val book = (cashbook.await() as? NetworkResult.Success)?.data
+            val updated = home.copy(
+                month = (summary.await() as? NetworkResult.Success)?.data,
+                monthMoneyIn = book?.moneyIn,
+                monthMoneyOut = book?.moneyOut,
+                recent = book?.entries.orEmpty().take(5),
+                owed = (owed.await() as? NetworkResult.Success)?.data,
+                paymentsToApprove = (payments.await() as? NetworkResult.Success)?.data.orEmpty().count { it.waitingForApproval },
+                suppliersToCheck = (suppliers.await() as? NetworkResult.Success)?.data.orEmpty().count { !it.isVerified },
+            )
+            _state.update { it.copy(data = updated) }
+        }
+    }
+
+    /** Owners only; the server checks the role and records it in the audit log. */
+    fun setApprovalLimit(amount: String) = act("Approval limit changed") { repository.setApprovalLimit(businessId, amount) }
+}
+
+// --- Starting a business --------------------------------------------------------------------------
+
+/** Set once the business exists, to open it. */
+data class NewBusiness(val createdId: String? = null)
+
+@HiltViewModel
+class NewBusinessViewModel @Inject constructor(repository: BusinessRepository) : BaseBusinessViewModel<NewBusiness>(repository) {
+    init { _state.update { it.copy(data = NewBusiness(), loading = false) } }
+
+    override fun load() = Unit
+
+    fun create(name: String, registrationNumber: String) {
+        if (name.isBlank()) return _state.update { it.copy(message = "Give the business a name.") }
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.createBusiness(name, registrationNumber)) {
+                is NetworkResult.Success -> {
+                    repository.refreshMine() // the Business tab and Home's business card appear
+                    _state.update { it.copy(busy = false, data = NewBusiness(result.data.id)) }
+                }
+                is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+}
+
+// --- The team: owners, admins, finance, viewers ----------------------------------------------------
+
+data class Team(
+    val business: Business,
+    val members: List<Member>,
+    /** Loaded for owners and admins only. */
+    val invitations: List<TeamInvitation>,
+    val myEmail: String,
+    /** Set when the user left the business, to go back. */
+    val left: Boolean = false,
+) {
+    fun isMe(member: Member) = member.email.equals(myEmail, ignoreCase = true)
+
+    fun canManage(role: String) = business.manageableRoles.any { it.name == role }
+}
+
+@HiltViewModel
+class TeamViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    repository: BusinessRepository,
+    private val auth: AuthRepository,
+) : BaseBusinessViewModel<Team>(repository) {
+    private val businessId: String = checkNotNull(savedState[BusinessRoutes.BUSINESS_ID])
+
+    init { load() }
+
+    override fun load() {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = it.data == null, error = null) }
+            val business = async { repository.business(businessId) }
+            val members = async { repository.members(businessId) }
+            val b = business.await().orFail() ?: return@launch
+            val ms = members.await().orFail() ?: return@launch
+            val invitations = if (b.manageableRoles.isEmpty()) emptyList() else repository.teamInvitations(businessId).orFail() ?: return@launch
+            val me = auth.observeProfile().first()?.email.orEmpty()
+            _state.update { it.copy(data = Team(b, ms, invitations, me), loading = false) }
+        }
+    }
+
+    fun invite(email: String, role: TeamRole) =
+        act("Invitation emailed to ${email.trim()}") { repository.inviteMember(businessId, email, role.name) }
+
+    fun cancelInvitation(invitation: TeamInvitation) =
+        act("Invitation to ${invitation.email} cancelled") { repository.revokeTeamInvitation(businessId, invitation.id) }
+
+    fun changeRole(member: Member, role: TeamRole) =
+        act("${member.fullName.ifBlank { member.email }} is now ${role.label.lowercase()}") {
+            repository.changeRole(businessId, member.id, role.name)
+        }
+
+    fun remove(member: Member) =
+        act("${member.fullName.ifBlank { member.email }} removed from the team") { repository.removeMember(businessId, member.id) }
+
+    fun leave(me: Member) {
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.removeMember(businessId, me.id)) {
+                is NetworkResult.Success -> {
+                    repository.refreshMine()
+                    _state.update { it.copy(busy = false, data = it.data?.copy(left = true)) }
+                }
+                is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+}
+
+/**
+ * Accepting an emailed invitation to a business's team: opened from its link (fluxpay://join-business?token=…),
+ * or with the link pasted in.
+ */
+data class JoinTeam(val link: String = "", val joined: Business? = null)
+
+@HiltViewModel
+class JoinTeamViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    repository: BusinessRepository,
+) : BaseBusinessViewModel<JoinTeam>(repository) {
+    init {
+        _state.update { it.copy(data = JoinTeam(savedState.get<String>(BusinessRoutes.TOKEN).orEmpty()), loading = false) }
+    }
+
+    override fun load() = Unit
+
+    fun onLink(link: String) = _state.update { it.copy(data = it.data?.copy(link = link)) }
+
+    fun accept() {
+        val token = tokenFrom(_state.value.data?.link.orEmpty())
+        if (token.isEmpty()) return _state.update { it.copy(message = "Paste the link from the invitation email.") }
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.acceptTeamInvitation(token)) {
+                is NetworkResult.Success -> {
+                    repository.refreshMine()
+                    _state.update { it.copy(busy = false, data = it.data?.copy(joined = result.data)) }
+                }
+                is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+
+    companion object {
+        /** The whole link from the email, or just its token. */
+        fun tokenFrom(text: String): String {
+            val trimmed = text.trim()
+            return Regex("""[?&]token=([^&\s]+)""").find(trimmed)?.groupValues?.get(1) ?: trimmed
         }
     }
 }
@@ -371,6 +571,78 @@ class JoinBusinessViewModel @Inject constructor(
     private fun fail(message: String) = _state.update { it.copy(busy = false, message = message) }
 }
 
+// --- Suppliers and paying them --------------------------------------------------------------------
+
+data class Suppliers(
+    val business: Business,
+    val suppliers: List<Supplier>,
+    val payments: List<BusinessPayment>,
+    val currency: String,
+)
+
+/** Saved suppliers (with payout details an owner or admin has checked) and payments to them. */
+@HiltViewModel
+class SuppliersViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    repository: BusinessRepository,
+) : BaseBusinessViewModel<Suppliers>(repository) {
+    private val businessId: String = checkNotNull(savedState[BusinessRoutes.BUSINESS_ID])
+
+    init { load() }
+
+    override fun load() {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = it.data == null, error = null) }
+            val business = async { repository.business(businessId) }
+            val suppliers = async { repository.suppliers(businessId) }
+            val payments = async { repository.businessPayments(businessId) }
+            val wallet = async { repository.wallet(businessId) }
+            val b = business.await().orFail() ?: return@launch
+            val ss = suppliers.await().orFail() ?: return@launch
+            val ps = payments.await().orFail() ?: return@launch
+            val w = wallet.await().orFail() ?: return@launch
+            _state.update { it.copy(data = Suppliers(b, ss, ps, w.currency), loading = false) }
+        }
+    }
+
+    fun add(name: String, kind: String, method: PayoutMethod, details: Map<String, String>) =
+        act("$name saved. An owner or admin must check the payout details before the first payment.") {
+            repository.addSupplier(businessId, name, kind, method, details)
+        }
+
+    fun verify(supplier: Supplier) = act("${supplier.name}'s payout details checked: you can pay them") {
+        repository.verifySupplier(businessId, supplier.id)
+    }
+
+    fun archive(supplier: Supplier) = act("${supplier.name} removed") { repository.archiveSupplier(businessId, supplier.id) }
+
+    fun pay(supplier: Supplier, amount: String, note: String) {
+        val key = java.util.UUID.randomUUID().toString()
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            when (val result = repository.paySupplier(businessId, supplier.id, amount, note, key)) {
+                is NetworkResult.Success -> {
+                    val payment = result.data
+                    val message = when (payment.status) {
+                        "PENDING_APPROVAL" -> "Above the approval limit: it waits for an owner or admin to approve"
+                        "PROCESSING" -> "Sent to ${payment.payoutMethod ?: "the provider"}: it shows as paid once confirmed"
+                        "FAILED" -> "Payment failed: ${payment.failureReason.orEmpty()}"
+                        else -> "Paid ${supplier.name}"
+                    }
+                    _state.update { it.copy(busy = false, message = message) }
+                    load()
+                }
+                is NetworkResult.Error -> _state.update { it.copy(busy = false, message = result.message) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+
+    fun decide(payment: BusinessPayment, action: String, note: String = "") = act(
+        when (action) { "approve" -> "Approved: ${payment.recipient} is being paid"; "reject" -> "Rejected"; else -> "Cancelled" },
+    ) { repository.businessPaymentAction(businessId, payment.id, action, note) }
+}
+
 // --- Pay runs ------------------------------------------------------------------------------------
 
 data class PayRuns(val business: Business, val runs: List<PayRun>, val createdRunId: String? = null)
@@ -470,6 +742,11 @@ data class Books(
     val cashbook: Cashbook,
     val summary: BooksSummary,
     val categories: List<BookCategory>,
+    /** Bills (we owe) and invoices (owed to us), with totals. */
+    val invoices: Invoices,
+    val openOnly: Boolean = true,
+    /** The cashbook entries that could pay the invoice being paid; null while loading. */
+    val payable: List<BookEntry>? = null,
 )
 
 @HiltViewModel
@@ -479,6 +756,7 @@ class BooksViewModel @Inject constructor(
 ) : BaseBusinessViewModel<Books>(repository) {
     private val businessId: String = checkNotNull(savedState[BusinessRoutes.BUSINESS_ID])
     private var period = BooksPeriod.THIS_MONTH
+    private var openOnly = true
 
     init { load() }
 
@@ -504,14 +782,46 @@ class BooksViewModel @Inject constructor(
             val cashbook = async { repository.cashbook(businessId, start, end) }
             val summary = async { repository.summary(businessId, start, end) }
             val categories = async { repository.categories(businessId) }
+            val invoices = async { repository.invoices(businessId, openOnly) }
             val b = business.await().orFail() ?: return@launch
             val c = cashbook.await().orFail() ?: return@launch
             val s = summary.await().orFail() ?: return@launch
             val cats = categories.await().orFail() ?: return@launch
-            _state.update { it.copy(data = Books(b, period, c, s, cats), loading = false) }
+            val inv = invoices.await().orFail() ?: return@launch
+            _state.update { it.copy(data = Books(b, period, c, s, cats, inv, openOnly), loading = false) }
         }
     }
 
     fun refile(entry: BookEntry, category: BookCategory) =
         act("Filed under ${category.name}") { repository.reclassify(businessId, entry.id, category.id) }
+
+    fun showOpenOnly(open: Boolean) {
+        openOnly = open
+        load()
+    }
+
+    fun record(isBill: Boolean, party: String, amount: String, category: BookCategory, description: String, dueDate: String?) =
+        act(if (isBill) "Bill recorded: it shows as owed until you link its payment" else "Invoice recorded") {
+            repository.createInvoice(businessId, isBill, party, amount, category.id, description, dueDate)
+        }
+
+    /** Loads the cashbook entries that could pay this bill or collect this invoice. */
+    fun findPayments(invoice: Invoice) {
+        _state.update { it.copy(data = it.data?.copy(payable = null)) }
+        viewModelScope.launch {
+            when (val result = repository.payableEntries(businessId, invoice.id)) {
+                is NetworkResult.Success -> _state.update { it.copy(data = it.data?.copy(payable = result.data)) }
+                is NetworkResult.Error -> _state.update { it.copy(message = result.message, data = it.data?.copy(payable = emptyList())) }
+                NetworkResult.Loading -> Unit
+            }
+        }
+    }
+
+    fun pay(invoice: Invoice, entry: BookEntry) =
+        act("${invoice.number}: ${if (invoice.isBill) "payment" else "receipt"} linked") {
+            repository.payInvoice(businessId, invoice.id, entry.id)
+        }
+
+    fun cancel(invoice: Invoice, reason: String) =
+        act("${invoice.number} cancelled") { repository.cancelInvoice(businessId, invoice.id, reason) }
 }

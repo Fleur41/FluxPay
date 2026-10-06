@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin, messages
-from django.db import transaction
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import F, Sum
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpResponseRedirect
@@ -19,7 +19,7 @@ from unfold.widgets import (
 
 from audit.services import record
 from banking.models import Account, ManualAdjustment
-from fluxpay.admin_base import admin_link, money
+from fluxpay.admin_base import StaffViewAuditMixin, admin_link, money
 from fluxpay.exceptions import BusinessError
 from platform_settings.services import enabled_currencies
 
@@ -27,9 +27,10 @@ from . import services
 from .models import (
     AccountingSettings,
     BankAccount,
-    BusinessEntry,
     BankReconciliation,
+    BusinessEntry,
     CashbookEntry,
+    Invoice,
     JournalEntry,
     JournalLine,
     LedgerAccount,
@@ -140,7 +141,7 @@ class LedgerAccountForm(forms.ModelForm):
 
 
 @admin.register(LedgerAccount)
-class LedgerAccountAdmin(ModelAdmin):
+class LedgerAccountAdmin(StaffViewAuditMixin, ModelAdmin):
     form = LedgerAccountForm
     list_display = ("code", "name", "type_label", "currency", "books_of", "balance", "kind", "open_ledger")
     list_filter = (BooksFilter, "currency", "type", "is_active")
@@ -859,7 +860,7 @@ class JournalEntryAdmin(ModelAdmin):
 
 
 @admin.register(BusinessEntry)
-class BusinessEntryAdmin(ModelAdmin):
+class BusinessEntryAdmin(StaffViewAuditMixin, ModelAdmin):
     """Every business's cashbook lines, read-only. Businesses re-file categories themselves in the app."""
 
     list_display = ("date", "business", "wallet_number", "direction_label", "amount_display", "category_name",
@@ -902,6 +903,57 @@ class BusinessEntryAdmin(ModelAdmin):
     @display(description="Category", ordering="category__name")
     def category_name(self, entry):
         return entry.category.name
+
+
+@admin.register(Invoice)
+class InvoiceAdmin(StaffViewAuditMixin, ModelAdmin):
+    """Every business's bills (payables) and invoices (receivables), read-only. Businesses record them in the app."""
+
+    list_display = ("number", "business", "kind_label", "party", "amount_display", "outstanding_display", "due_date",
+                    "status_label", "issue_date")  # fmt: skip
+    list_filter = ("kind", "status", "organization", ("issue_date", RangeDateFilter))
+    list_filter_submit = True
+    search_fields = ("organization__name", "number", "party", "description")
+    search_help_text = "Search by business, number, supplier/customer or description"
+    list_select_related = ("organization", "category")
+    readonly_fields = ("payments_table",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @display(description="Business", ordering="organization__name")
+    def business(self, invoice):
+        return invoice.organization.name
+
+    @display(description="Type", label={"BILL": "warning", "INVOICE": "info"})
+    def kind_label(self, invoice):
+        return invoice.kind, invoice.get_kind_display()
+
+    @display(description="Status", label={"OPEN": "warning", "PART_PAID": "info", "PAID": "success", "CANCELLED": "danger"})
+    def status_label(self, invoice):
+        return invoice.status, invoice.get_status_display()
+
+    @display(description="Amount", ordering="amount")
+    def amount_display(self, invoice):
+        return money(invoice.amount, invoice.currency)
+
+    @display(description="Still owed")
+    def outstanding_display(self, invoice):
+        return money(invoice.outstanding, invoice.currency)
+
+    @display(description="Paid by")
+    def payments_table(self, invoice):
+        rows = [(p.entry.date, p.entry.reference, p.entry.counterparty, money(p.amount, invoice.currency))
+                for p in invoice.payments.select_related("entry")]  # fmt: skip
+        if not rows:
+            return "Nothing paid yet"
+        return format_html_join("", "<div>{} · {} · {} · {}</div>", rows)
 
 
 # --- Reconciliations and settings ----------------------------------------------------------------

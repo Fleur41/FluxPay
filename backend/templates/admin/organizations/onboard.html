@@ -1,0 +1,21 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<form method="post" class="flex flex-col gap-5" style="max-width: 640px">
+    {% csrf_token %}
+    <p>Sets up the business with its own wallet and books, and makes this person its owner. They manage it in the
+        FluxPay app: workers, payroll, suppliers, books and their team. Their wallet starts empty: credit it from a
+        bank receipt under Cashbook when they pay in.</p>
+    {% for field in form %}
+    <div class="flex flex-col gap-2">
+        <label for="{{ field.id_for_label }}" class="font-semibold">{{ field.label }}{% if not field.field.required %} <span class="font-normal" style="color: var(--color-base-500)">(optional)</span>{% endif %}</label>
+        {{ field }}
+        {% for error in field.errors %}<p class="text-red-600 text-sm">{{ error }}</p>{% endfor %}
+        {% if field.help_text %}<p class="text-sm" style="color: var(--color-base-500)">{{ field.help_text }}</p>{% endif %}
+    </div>
+    {% endfor %}
+    <div class="flex gap-2">
+        <button type="submit" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-primary-600 text-white"><span class="material-symbols-outlined">add_business</span> Onboard business</button>
+        <a href="{{ back }}" class="font-medium inline-flex items-center rounded-default px-3 py-2 border border-base-200 dark:border-base-700">Cancel</a>
+    </div>
+</form>
+{% endblock %}

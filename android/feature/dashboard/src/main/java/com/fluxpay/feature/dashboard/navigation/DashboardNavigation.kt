@@ -11,6 +11,7 @@ object DashboardRoutes {
 
 fun NavGraphBuilder.dashboardScreen(
     onSendMoney: () -> Unit,
+    onSendToMpesa: () -> Unit,
     onSeeAllTransactions: () -> Unit,
     onTransactionClick: (Transaction) -> Unit,
     onOpenBudget: () -> Unit,
@@ -20,6 +21,7 @@ fun NavGraphBuilder.dashboardScreen(
     composable(DashboardRoutes.DASHBOARD) {
         DashboardScreen(
             onSendMoney = onSendMoney,
+            onSendToMpesa = onSendToMpesa,
             onSeeAllTransactions = onSeeAllTransactions,
             onTransactionClick = onTransactionClick,
             onOpenBudget = onOpenBudget,

@@ -16,6 +16,7 @@ import com.fluxpay.feature.dashboard.navigation.dashboardScreen
 import com.fluxpay.feature.settings.navigation.settingsScreen
 import com.fluxpay.feature.transactions.navigation.navigateToTransaction
 import com.fluxpay.feature.transactions.navigation.transactionsScreens
+import com.fluxpay.feature.transfer.navigation.TransferRoutes
 import com.fluxpay.feature.transfer.navigation.transferScreen
 
 const val MAIN_GRAPH = "main_graph"
@@ -42,6 +43,7 @@ fun FluxPayNavHost(
         navigation(startDestination = DashboardRoutes.DASHBOARD, route = MAIN_GRAPH) {
             dashboardScreen(
                 onSendMoney = { navController.navigateToTopLevel(TopLevelDestination.SEND) },
+                onSendToMpesa = { navController.navigate(TransferRoutes.MPESA) },
                 onSeeAllTransactions = { navController.navigateToTopLevel(TopLevelDestination.ACTIVITY) },
                 onTransactionClick = { navController.navigateToTransaction(it.id) },
                 onOpenBudget = { navController.navigateToBudget() },
@@ -51,9 +53,15 @@ fun FluxPayNavHost(
             transferScreen(
                 onDone = { navController.navigateToTopLevel(TopLevelDestination.HOME) },
                 onViewTransaction = { id -> navController.navigateToTransaction(id) },
+                onBack = navController::popBackStack,
             )
             transactionsScreens(navController)
-            settingsScreen(onOpenEmployers = { navController.navigate(BusinessRoutes.EMPLOYERS) })
+            settingsScreen(
+                navController,
+                onOpenEmployers = { navController.navigate(BusinessRoutes.EMPLOYERS) },
+                onStartBusiness = { navController.navigate(BusinessRoutes.NEW) },
+                onJoinTeam = { navController.navigate(BusinessRoutes.JOIN_TEAM_START) },
+            )
             budgetScreen(onBack = navController::popBackStack)
             businessScreens(navController)
         }

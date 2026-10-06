@@ -33,6 +33,7 @@ CHART = {
     "capital": ("3000", "Owner's capital", T.EQUITY, "Money the owners put into the business."),
     "drawings": ("3100", "Owner's drawings", T.EQUITY, "Money the owners took out of the business."),
     "sales": ("4000", "Sales and revenue", T.INCOME, "Money customers paid the business."),
+    "interest_income": ("4800", "Interest earned", T.INCOME, "Interest paid to the business, e.g. on savings."),
     "other_income": ("4900", "Other income", T.INCOME, ""),
     "salaries": ("5000", "Salaries and wages", T.EXPENSE, "Pay to workers, through FluxPay payroll."),
     "allowances": ("5001", "Allowances", T.EXPENSE, "Transport, housing and other allowances paid to workers."),
@@ -266,7 +267,10 @@ def reclassify(*, entry: BusinessEntry, new_category: LedgerAccount, actor, note
         if old.pk == new_category.pk:
             return entry
         if old.is_control:
-            raise BusinessError("Moves between your own wallets can't be re-filed.", "cannot_reclassify")
+            raise BusinessError(
+                "This entry pays a bill or invoice, or moves money between your own wallets, so it can't be re-filed.",
+                "cannot_reclassify",
+            )
         memo = f"Re-filed {entry.reference or 'entry'} from {old.name} to {new_category.name}"
         # Money in sits as a credit on its category, money out as a debit: move that balance across.
         lines = [(old, entry.amount, 0, memo), (new_category, 0, entry.amount, memo)]

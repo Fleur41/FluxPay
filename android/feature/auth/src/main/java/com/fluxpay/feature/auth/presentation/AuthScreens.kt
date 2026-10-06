@@ -42,6 +42,25 @@ fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    if (state.mfaToken != null) {
+        AuthScaffold(title = "Two-step verification", subtitle = "Enter the 6-digit code from your authenticator app.") {
+            state.errorMessage?.let { ErrorBanner(it) }
+            FluxTextField(
+                value = state.code,
+                onValueChange = viewModel::onCodeChange,
+                label = "Code",
+                keyboardType = KeyboardType.Number,
+                onImeAction = viewModel::submitCode,
+                supportingText = "Lost your phone? Enter one of your recovery codes instead.",
+            )
+            FluxPrimaryButton(text = "Verify", onClick = viewModel::submitCode, loading = state.isLoading,
+                enabled = state.code.isNotBlank())
+            TextButton(onClick = viewModel::cancelCode, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text("Use a different account")
+            }
+        }
+        return
+    }
     AuthScaffold(title = "Welcome back", subtitle = "Sign in to move money with FluxPay.") {
         state.errorMessage?.let { ErrorBanner(it) }
         FluxTextField(

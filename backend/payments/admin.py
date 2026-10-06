@@ -16,7 +16,7 @@ from unfold.widgets import (
 )
 
 from accounting.models import BankAccount
-from fluxpay.admin_base import ViewOnlyAdmin, admin_link
+from fluxpay.admin_base import StaffViewAuditMixin, ViewOnlyAdmin, admin_link
 from fluxpay.exceptions import BusinessError
 
 from . import services
@@ -80,7 +80,7 @@ STATUS_COLOURS = {
 
 
 @admin.register(ExternalPayment)
-class ExternalPaymentAdmin(ViewOnlyAdmin):
+class ExternalPaymentAdmin(StaffViewAuditMixin, ViewOnlyAdmin):
     """Deposits and payouts through outside providers. Status only changes through payments.services."""
 
     list_display = ("created_at", "reference", "wallet", "kind", "rail", "amount", "currency", "status_label", "review")

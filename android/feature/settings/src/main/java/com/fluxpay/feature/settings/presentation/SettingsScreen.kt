@@ -13,13 +13,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.Icon
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.AddBusiness
+import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -27,6 +29,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -55,7 +58,13 @@ import com.fluxpay.feature.settings.presentation.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(onOpenEmployers: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onOpenEmployers: () -> Unit,
+    onStartBusiness: () -> Unit,
+    onJoinTeam: () -> Unit,
+    onOpenSecurity: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     val scrollState = rememberScrollState()
@@ -108,12 +117,33 @@ fun SettingsScreen(onOpenEmployers: () -> Unit, viewModel: SettingsViewModel = h
                 }
             }
 
+            SettingsSection("Security") {
+                SettingsRow(
+                    icon = Icons.Outlined.Lock,
+                    title = "Two-step verification",
+                    subtitle = "A code from an authenticator app when you sign in. Needed to manage a business",
+                    onClick = onOpenSecurity,
+                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+            }
+
             SettingsSection("Work") {
                 SettingsRow(
                     icon = Icons.Outlined.Badge,
                     title = "My employers",
                     subtitle = "Businesses that pay you. Join one with a code or QR code",
                     onClick = onOpenEmployers,
+                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                SettingsRow(
+                    icon = Icons.Outlined.AddBusiness,
+                    title = "Start a business",
+                    subtitle = "Its own wallet to pay workers and suppliers, and its own books",
+                    onClick = onStartBusiness,
+                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                SettingsRow(
+                    icon = Icons.Outlined.Groups,
+                    title = "Join a business team",
+                    subtitle = "Invited to help run a business? Accept with the link from the email",
+                    onClick = onJoinTeam,
                 ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
             }
 

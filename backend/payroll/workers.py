@@ -10,6 +10,7 @@ owners and admins approve join requests and run the join code (Perm.APPROVE_WORK
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -24,13 +25,15 @@ from audit.services import record
 from banking.models import Account
 from banking.services import open_wallet
 from fluxpay.exceptions import BusinessError
-from notifications.sms import get_sms_backend, normalize_phone
+from notifications.sms import SmsError, get_sms_backend, normalize_phone
 from organizations.models import Membership, Organization
 from organizations.roles import Perm, Role, has_perm
 from organizations.services import cashbook
 from platform_settings import services as rules
 
 from .models import Worker
+
+logger = logging.getLogger(__name__)
 
 W = Worker.Status
 # Crockford's base 32: no I, L, O or U, so codes survive being read out or typed from an SMS.
@@ -104,9 +107,12 @@ def invite(*, membership, salary_amount, full_name="", phone_number="", email=""
     if phone_number and not phone:
         raise BusinessError("Enter a valid phone number, e.g. 0712 345 678.", "invalid_phone")
     if not phone and not email:
-        raise BusinessError("Give the worker's phone number (or their FluxPay account number).", "contact_required")
+        raise BusinessError("Give the worker's email, phone number or FluxPay account number.", "contact_required")
     if user and Worker.objects.filter(organization=organization, user=user, status__in=Worker.OPEN).exists():
         raise BusinessError(f"{user.full_name} already works here or has a pending invitation.", "already_worker")
+    email = (email or "").strip().lower()
+    if email and Worker.objects.filter(organization=organization, email=email, status=W.INVITED).exists():
+        raise BusinessError("That email already has a pending invitation. Resend it instead.", "already_invited")
 
     code = new_code()
     try:
@@ -407,19 +413,35 @@ def _audit(action: str, worker: Worker, *, actor, **metadata) -> None:
 
 
 def _send_invitation(worker: Worker, code: str) -> None:
+    """By SMS and email. Each is tried on its own: an SMS provider failure never stops the email."""
     business = worker.organization.name
     link = settings.WORKER_INVITE_LINK.format(code=code)
     days = rules.platform().invitation_expiry_days
-    text = (f"{business} invited you to get paid through FluxPay. Open {link} or enter code {display_code(code)} "
-            f"in the FluxPay app (I work for a business). Expires in {days} days.")  # fmt: skip
+    shown = display_code(code)
     if worker.phone_number:
-        get_sms_backend().send(worker.phone_number, text)
+        text = (f"{business} invited you to get paid through FluxPay. In the FluxPay app tap Join a business and "
+                f"enter code {shown}, or open {link}. Expires in {days} days.")  # fmt: skip
+        try:
+            get_sms_backend().send(worker.phone_number, text)
+        except SmsError:
+            logger.warning("Invitation SMS to worker %s failed; the email (if any) still goes out", worker.pk, exc_info=True)
     if worker.email:
         send_mail(
             subject=f"{business} invited you to get paid through FluxPay", from_email=None,
             recipient_list=[worker.email],
-            message=f"Hello {worker.full_name},\n\n{text}\n\nYou'll create your own FluxPay login; "
-                    f"{business} never sees your password.\n",
+            message=(
+                f"Hello {worker.full_name},\n\n"
+                f"{business} wants to pay you through FluxPay. Your pay goes into your own FluxPay wallet, and you "
+                f"can send it to M-Pesa whenever you like.\n\n"
+                f"Your invitation code: {shown}\n\n"
+                f"To accept:\n"
+                f"1. Install the FluxPay app and sign in, or create your account (any email or phone works).\n"
+                f"2. On Home, tap \"Do you work for a business?\" (or Settings > My employers > Join a business).\n"
+                f"3. Enter the code {shown} and tap Accept.\n\n"
+                f"Or open this link, which shows your code and opens the app: {link}\n\n"
+                f"The code expires in {days} days. You'll create your own FluxPay login; {business} never sees your "
+                f"password. If you weren't expecting this, you can ignore this email.\n"
+            ),
         )  # fmt: skip
 
 

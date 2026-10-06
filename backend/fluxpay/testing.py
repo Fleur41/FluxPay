@@ -38,7 +38,11 @@ def customer_deposit(amount="5000.00", *, staff=None, currency="KES", counterpar
     from django.contrib.auth import get_user_model
 
     from accounting.models import BankAccount
-    from accounting.services import business_date, open_bank_account, record_cashbook_entry
+    from accounting.services import (
+        business_date,
+        open_bank_account,
+        record_cashbook_entry,
+    )
 
     User = get_user_model()
     if staff is None:

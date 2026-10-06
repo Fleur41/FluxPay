@@ -152,7 +152,7 @@ fun WorkersScreen(onBack: () -> Unit, viewModel: WorkersViewModel = hiltViewMode
                 item {
                     val (title, text) = when (data.tab) {
                         WorkerTab.ACTIVE -> "No workers yet" to
-                            "Invite workers by phone number or FluxPay account number. They join when they accept, and their pay goes to their own wallet."
+                            "Invite workers by email, phone number or FluxPay account number. They join when they accept, and their pay goes to their own wallet."
                         WorkerTab.INVITED -> "No pending invitations" to "Invitations you send appear here until the worker accepts."
                         WorkerTab.REQUESTS -> "No requests to join" to
                             "Workers who enter or scan your join code ask to join here. Nobody joins without your approval."
@@ -181,17 +181,18 @@ fun WorkersScreen(onBack: () -> Unit, viewModel: WorkersViewModel = hiltViewMode
     if (inviting) {
         InputDialog(
             title = "Invite worker",
-            message = "They get a code by SMS (and email) and join when they accept it. They create their own " +
-                "FluxPay login: you never see or set their password.",
+            message = "They get a code by email (and SMS, if you add their phone) and join when they accept it in the " +
+                "FluxPay app. They create their own login: you never see or set their password. Give an email, a phone " +
+                "number or their FluxPay account number.",
             fields = listOf(
-                Triple("Phone number or FluxPay account number", KeyboardType.Phone, ""),
                 Triple("Full name", KeyboardType.Text, ""),
-                Triple("Email (optional)", KeyboardType.Email, ""),
+                Triple("Email", KeyboardType.Email, ""),
+                Triple("Phone or FluxPay account number (optional)", KeyboardType.Phone, ""),
                 Triple("Monthly salary", KeyboardType.Decimal, ""),
                 Triple("Job title (optional)", KeyboardType.Text, ""),
             ),
             confirm = "Send invitation",
-            onConfirm = { (who, name, email, salary, job) -> inviting = false; viewModel.invite(name, who, email, salary, job) },
+            onConfirm = { (name, email, who, salary, job) -> inviting = false; viewModel.invite(name, who, email, salary, job) },
             onDismiss = { inviting = false },
         )
     }

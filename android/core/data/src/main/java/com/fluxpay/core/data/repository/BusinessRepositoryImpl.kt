@@ -9,35 +9,56 @@ import com.fluxpay.core.domain.model.BookEntry
 import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.Business
 import com.fluxpay.core.domain.model.BusinessBalance
+import com.fluxpay.core.domain.model.BusinessPayment
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
-import com.fluxpay.core.domain.model.WorkerStatus
-import com.fluxpay.core.domain.model.JoinCode
-import com.fluxpay.core.domain.model.InvitationPreview
 import com.fluxpay.core.domain.model.Employer
+import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.Invoice
+import com.fluxpay.core.domain.model.InvoiceTotals
+import com.fluxpay.core.domain.model.Invoices
+import com.fluxpay.core.domain.model.JoinCode
+import com.fluxpay.core.domain.model.Member
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.PayRun
 import com.fluxpay.core.domain.model.PayRunStatus
+import com.fluxpay.core.domain.model.PayoutMethod
 import com.fluxpay.core.domain.model.Payslip
 import com.fluxpay.core.domain.model.SummaryLine
 import com.fluxpay.core.domain.model.SummarySection
+import com.fluxpay.core.domain.model.Supplier
+import com.fluxpay.core.domain.model.TeamInvitation
 import com.fluxpay.core.domain.model.Worker
 import com.fluxpay.core.domain.model.WorkerImportResult
+import com.fluxpay.core.domain.model.WorkerStatus
 import com.fluxpay.core.domain.repository.BusinessRepository
 import com.fluxpay.core.network.ApiCaller
 import com.fluxpay.core.network.api.FluxPayApi
 import com.fluxpay.core.network.dto.AmountDto
+import com.fluxpay.core.network.dto.BeneficiaryDto
+import com.fluxpay.core.network.dto.BusinessPaymentCreateDto
+import com.fluxpay.core.network.dto.BusinessPaymentDto
 import com.fluxpay.core.network.dto.CategoryDto
-import com.fluxpay.core.network.dto.WorkerActionDto
-import com.fluxpay.core.network.dto.JoinCodeDto
-import com.fluxpay.core.network.dto.EmployerDto
 import com.fluxpay.core.network.dto.CodeDto
+import com.fluxpay.core.network.dto.EmployerDto
+import com.fluxpay.core.network.dto.InvoiceCreateDto
+import com.fluxpay.core.network.dto.InvoiceDto
+import com.fluxpay.core.network.dto.InvoicePayDto
+import com.fluxpay.core.network.dto.JoinCodeDto
 import com.fluxpay.core.network.dto.NoteDto
+import com.fluxpay.core.network.dto.OrganizationCreateDto
+import com.fluxpay.core.network.dto.OrganizationDto
+import com.fluxpay.core.network.dto.OrganizationPatchDto
 import com.fluxpay.core.network.dto.PayRunCreateDto
 import com.fluxpay.core.network.dto.PayRunDto
 import com.fluxpay.core.network.dto.ReasonDto
 import com.fluxpay.core.network.dto.ReclassifyDto
+import com.fluxpay.core.network.dto.RoleDto
 import com.fluxpay.core.network.dto.SummarySectionDto
+import com.fluxpay.core.network.dto.TeamInvitationDto
+import com.fluxpay.core.network.dto.TeamInviteDto
+import com.fluxpay.core.network.dto.TokenDto
+import com.fluxpay.core.network.dto.WorkerActionDto
 import com.fluxpay.core.network.dto.WorkerCreateDto
 import com.fluxpay.core.network.dto.WorkerDto
 import com.fluxpay.core.network.dto.WorkerImportDto
@@ -89,9 +110,40 @@ class BusinessRepositoryImpl @Inject constructor(
         myPay.value = emptyList()
     }
 
-    override suspend fun businesses() = call { api.organizations() }.map { list ->
-        list.map { Business(it.id, it.name, it.role.orEmpty(), it.status == "ACTIVE") }
+    override suspend fun businesses() = call { api.organizations() }.map { list -> list.map { it.toDomain() } }
+
+    override suspend fun setApprovalLimit(businessId: String, amount: String) =
+        call { api.updateOrganization(businessId, OrganizationPatchDto(amount.replace(",", "").trim())) }.map { it.toDomain() }
+
+    private fun OrganizationDto.toDomain() = Business(id, name, role.orEmpty(), status == "ACTIVE", approvalThreshold)
+
+    override suspend fun createBusiness(name: String, registrationNumber: String) =
+        call { api.createOrganization(OrganizationCreateDto(name.trim(), registrationNumber.trim())) }.map { it.toDomain() }
+
+    override suspend fun members(businessId: String) = call { api.members(businessId) }.map { list ->
+        list.map { Member(it.id, it.email, it.fullName, it.role) }
     }
+
+    override suspend fun teamInvitations(businessId: String) = call { api.teamInvitations(businessId) }.map { list ->
+        list.map { it.toDomain() }
+    }
+
+    override suspend fun inviteMember(businessId: String, email: String, role: String) =
+        call { api.inviteMember(businessId, TeamInviteDto(email.trim(), role)) }.map { it.toDomain() }
+
+    override suspend fun revokeTeamInvitation(businessId: String, invitationId: String) =
+        call { api.revokeTeamInvitation(businessId, invitationId) }.map { }
+
+    override suspend fun changeRole(businessId: String, memberId: String, role: String) =
+        call { api.changeRole(businessId, memberId, RoleDto(role)) }.map { Member(it.id, it.email, it.fullName, it.role) }
+
+    override suspend fun removeMember(businessId: String, memberId: String) =
+        call { api.removeMember(businessId, memberId) }.map { }
+
+    override suspend fun acceptTeamInvitation(token: String) =
+        call { api.acceptTeamInvitation(TokenDto(token.trim())) }.map { it.toDomain() }
+
+    private fun TeamInvitationDto.toDomain() = TeamInvitation(id, email, role, invitedBy, expiresAt.take(10))
 
     override suspend fun wallet(businessId: String) = call { api.organizationAccounts(businessId) }.map { accounts ->
         accounts.first().let { BusinessWallet(it.id, it.accountNumber, it.currency, it.balance) }
@@ -231,10 +283,100 @@ class BusinessRepositoryImpl @Inject constructor(
             expenses = it.incomeStatement.expenses.toDomain(),
             profit = it.incomeStatement.profit,
             assets = it.balanceSheet.assets.toDomain(),
+            liabilities = it.balanceSheet.liabilities.toDomain(),
             equity = it.balanceSheet.equity.toDomain(),
             balanced = it.balanceSheet.balanced,
         )
     }
+
+    override suspend fun suppliers(businessId: String) = call { api.beneficiaries(businessId).results }.map { list ->
+        list.map { it.toDomain() }
+    }
+
+    override suspend fun addSupplier(
+        businessId: String,
+        name: String,
+        kind: String,
+        method: PayoutMethod,
+        details: Map<String, String>,
+    ) = call {
+        api.addBeneficiary(businessId, mapOf("name" to name.trim(), "kind" to kind, "method" to method.name) +
+            details.mapValues { it.value.trim() })
+    }.map { it.toDomain() }
+
+    override suspend fun verifySupplier(businessId: String, supplierId: String) =
+        call { api.verifyBeneficiary(businessId, supplierId) }.map { it.toDomain() }
+
+    override suspend fun archiveSupplier(businessId: String, supplierId: String) =
+        call { api.archiveBeneficiary(businessId, supplierId) }.map { it.toDomain() }
+
+    override suspend fun businessPayments(businessId: String) = call { api.businessPayments(businessId).results }.map { list ->
+        list.map { it.toDomain() }
+    }
+
+    override suspend fun paySupplier(businessId: String, supplierId: String, amount: String, note: String, idempotencyKey: String) =
+        call {
+            api.createBusinessPayment(
+                businessId, BusinessPaymentCreateDto(supplierId, amount.replace(",", "").trim(), note.trim(), idempotencyKey),
+            )
+        }.map { it.toDomain() }
+
+    override suspend fun businessPaymentAction(businessId: String, paymentId: String, action: String, note: String) =
+        call { api.businessPaymentAction(businessId, paymentId, action, NoteDto(note)) }.map { it.toDomain() }
+
+    private fun BeneficiaryDto.toDomain() = Supplier(
+        id, name, kindLabel, methodLabel, details.values.filter { it.isNotBlank() }.joinToString(" · "), isVerified,
+        verifiedBy, detailsChangedBy,
+    )
+
+    private fun BusinessPaymentDto.toDomain() = BusinessPayment(
+        id, reference, recipientName, typeLabel, amount, currency, status, statusLabel, note, createdBy, decidedBy,
+        failureReason, createdAt.take(10), payoutMethod,
+    )
+
+    override suspend fun invoices(businessId: String, openOnly: Boolean) =
+        call { api.invoices(businessId, if (openOnly) "1" else null) }.map { dto ->
+            Invoices(
+                dto.currency,
+                with(dto.totals) { InvoiceTotals(payable, receivable, payableOverdue, receivableOverdue) },
+                dto.results.map { it.toDomain() },
+            )
+        }
+
+    override suspend fun createInvoice(
+        businessId: String,
+        isBill: Boolean,
+        party: String,
+        amount: String,
+        categoryId: Int,
+        description: String,
+        dueDate: String?,
+    ) = call {
+        api.createInvoice(
+            businessId,
+            InvoiceCreateDto(if (isBill) "BILL" else "INVOICE", party.trim(), amount.replace(",", "").trim(), categoryId,
+                description.trim(), dueDate?.takeIf { it.isNotBlank() }),
+        )
+    }.map { it.toDomain() }
+
+    override suspend fun payableEntries(businessId: String, invoiceId: String) = call { api.payableEntries(businessId, invoiceId) }
+        .map { list ->
+            list.map {
+                BookEntry(it.id, it.date, it.direction == "IN", it.amount, it.counterparty, it.description, it.sourceLabel,
+                    it.category.toDomain(), it.balance)
+            }
+        }
+
+    override suspend fun payInvoice(businessId: String, invoiceId: String, entryId: String) =
+        call { api.payInvoice(businessId, invoiceId, InvoicePayDto(entryId)) }.map { it.toDomain() }
+
+    override suspend fun cancelInvoice(businessId: String, invoiceId: String, reason: String) =
+        call { api.cancelInvoice(businessId, invoiceId, ReasonDto(reason)) }.map { it.toDomain() }
+
+    private fun InvoiceDto.toDomain() = Invoice(
+        id, kind == "BILL", number, party, description, category.toDomain(), amount, paidAmount, outstanding, issueDate,
+        dueDate, isOverdue, status, statusLabel, payments.map { Triple(it.date, it.amount, it.counterparty) },
+    )
 
     override suspend fun categories(businessId: String) = call { api.categories(businessId) }.map { it.map { c -> c.toDomain() } }
 
@@ -273,6 +415,9 @@ class BusinessRepositoryImpl @Inject constructor(
             Payslip(it.id, it.workerName, it.accountNumber, it.jobTitle, it.amount, it.status, it.statusLabel, it.reference,
                 it.reversalReason)
         },
+        approvalThreshold = approvalThreshold ?: java.math.BigDecimal.ZERO,
+        walletBalance = walletBalance ?: java.math.BigDecimal.ZERO,
+        otherApprovers = otherApprovers.orEmpty(),
     )
 
     companion object {

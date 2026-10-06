@@ -234,3 +234,28 @@ class BrokerOutageTests(TransactionTestCase):
         self.assertEqual(res.status_code, 201, res.data)  # the money moved; a lost alert must not hide that
         brian_wallet.refresh_from_db()
         self.assertEqual(brian_wallet.balance, Decimal("1050.00"))
+
+
+class EmailDeliveryTests(TestCase):
+    """Real SMTP for real addresses; reserved test domains are only printed, so seed data never bounces."""
+
+    def test_test_addresses_are_printed_not_sent(self):
+        from unittest import mock
+
+        from django.core.mail import EmailMessage
+
+        from notifications.email import SmtpExceptTestAddressesBackend, deliverable
+
+        self.assertFalse(deliverable("worker001@kamautraders.test"))
+        self.assertFalse(deliverable("someone@example.com"))
+        self.assertTrue(deliverable("person@gmail.com"))
+        backend = SmtpExceptTestAddressesBackend(host="smtp.invalid", fail_silently=False)
+        with mock.patch("django.core.mail.backends.smtp.EmailBackend.send_messages", return_value=1) as smtp, \
+             mock.patch("django.core.mail.backends.console.EmailBackend.send_messages", return_value=1) as console:  # fmt: skip
+            sent = backend.send_messages([
+                EmailMessage("a", "b", to=["worker001@kamautraders.test"]),
+                EmailMessage("a", "b", to=["person@gmail.com", "x@example.com"]),
+            ])  # fmt: skip
+        self.assertEqual(sent, 2)
+        self.assertEqual([m.to for m in smtp.call_args.args[0]], [["person@gmail.com"]])
+        self.assertEqual([m.to for m in console.call_args.args[0]], [["worker001@kamautraders.test"]])

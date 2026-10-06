@@ -231,7 +231,7 @@ A label next to the FluxPay name shows **Development** (yellow) or **Production*
 | **Audit log** | Tamper check: confirms no audit record has been altered or removed |
 | **Recent top-ups & corrections** | The last six, with who posted them |
 
-Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Business payments**, **Payments** and **Email & SMS alerts** when something is waiting.
+Staff pass two-step verification (an authenticator app) once per session before any page opens; the first time, they set it up there. Opening a business's records is written to that business's own audit log (`staff.viewed_business_data`), which its owners can read. Staff only see the panels and menu items their permissions allow. The sidebar shows red counts next to **Business payments**, **Payments** and **Email & SMS alerts** when something is waiting.
 
 ### What each screen is for
 
@@ -299,7 +299,9 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | Method | Path | |
 |---|---|---|
 | POST | `auth/register/` | public — creates user + wallet, returns tokens |
-| POST | `auth/login/` | public — `{email, password}` → `{access, refresh, user}` |
+| POST | `auth/login/` | public — `{email, password}` → `{access, refresh, user}`, or with two-step verification on `{mfa_required: true, mfa_token}` |
+| POST | `auth/login/mfa/` | public — `{mfa_token, code}` → `{access, refresh, user}`; the code is from the authenticator app, or a recovery code. 10/min; 5 wrong codes lock it for 15 minutes |
+| GET, POST | `auth/mfa/` , `auth/mfa/setup/` , `auth/mfa/enable/` , `auth/mfa/disable/` , `auth/mfa/recovery-codes/` | two-step verification: status (`enabled`, `required`); a new secret and `otpauth_uri`; `{code}` turns it on and returns 10 recovery codes once; `{password, code}` turns it off; `{code}` replaces the recovery codes. Business owners and admins without it can view a business but get `mfa_required` (403) for anything else |
 | POST | `auth/refresh/` | public — rotates refresh token |
 | POST | `auth/logout/` | blacklists the refresh token |
 | GET/PATCH | `auth/me/` | profile |
@@ -333,6 +335,7 @@ All endpoints are under `/api/v1/` and use `Authorization: Bearer <access>` unle
 | GET/PATCH/DELETE | `organizations/{id}/workers/{worker_id}/` | one worker; PATCH pay details; DELETE removes them (or cancels the invitation/request), keeping their pay history |
 | POST | `organizations/{id}/workers/{worker_id}/{approve\|decline\|suspend\|reactivate\|resend-invitation}/` | approve a join request `{salary, job_title?, employee_number?}` (owners, admins); decline or suspend `{reason}`; suspended workers can't be paid |
 | GET/POST/DELETE | `organizations/{id}/worker-join-code/` | the business's join code and its QR link (owners, admins). POST makes a new one (the old stops working), DELETE switches it off |
+| GET | `organizations/{id}/books/reconciliation/` | does the business's money add up: wallet = ledger = cashbook, every movement has its cashbook line, payment statuses match their money, outside payouts settled. `balanced`, `problems`, `attention` (in flight, possible duplicates) |
 | GET/POST | `organizations/{id}/pay-runs/` , `…/pay-runs/{run_id}/` | payroll batches; DELETE cancels a draft |
 | POST | `organizations/{id}/pay-runs/{run_id}/payslips/` | add a line to a draft run, `{worker_id, amount, type}` (e.g. an `ALLOWANCE` on top of the salary) |
 | POST | `organizations/{id}/pay-runs/{run_id}/{submit\|approve\|reject}/` | send, approve or reject a pay run |

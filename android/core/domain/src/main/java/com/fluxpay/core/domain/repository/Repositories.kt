@@ -3,23 +3,35 @@ package com.fluxpay.core.domain.repository
 import com.fluxpay.core.common.result.NetworkResult
 import com.fluxpay.core.domain.model.Account
 import com.fluxpay.core.domain.model.BookCategory
+import com.fluxpay.core.domain.model.BookEntry
 import com.fluxpay.core.domain.model.BooksSummary
 import com.fluxpay.core.domain.model.BudgetLine
 import com.fluxpay.core.domain.model.Business
 import com.fluxpay.core.domain.model.BusinessBalance
+import com.fluxpay.core.domain.model.BusinessPayment
 import com.fluxpay.core.domain.model.BusinessWallet
 import com.fluxpay.core.domain.model.Cashbook
 import com.fluxpay.core.domain.model.DownloadedStatement
 import com.fluxpay.core.domain.model.Employer
 import com.fluxpay.core.domain.model.InvitationPreview
+import com.fluxpay.core.domain.model.Invoice
+import com.fluxpay.core.domain.model.Invoices
 import com.fluxpay.core.domain.model.JoinCode
+import com.fluxpay.core.domain.model.LoginResult
+import com.fluxpay.core.domain.model.Member
+import com.fluxpay.core.domain.model.MfaSetup
+import com.fluxpay.core.domain.model.MfaStatus
+import com.fluxpay.core.domain.model.MpesaWithdrawal
 import com.fluxpay.core.domain.model.MyPayslip
 import com.fluxpay.core.domain.model.NotificationSettings
 import com.fluxpay.core.domain.model.PayRun
+import com.fluxpay.core.domain.model.PayoutMethod
 import com.fluxpay.core.domain.model.PlatformConfig
 import com.fluxpay.core.domain.model.Recipient
 import com.fluxpay.core.domain.model.StatementFormat
 import com.fluxpay.core.domain.model.StatementPeriod
+import com.fluxpay.core.domain.model.Supplier
+import com.fluxpay.core.domain.model.TeamInvitation
 import com.fluxpay.core.domain.model.ThemeMode
 import com.fluxpay.core.domain.model.Transaction
 import com.fluxpay.core.domain.model.TransactionFilter
@@ -36,7 +48,21 @@ import kotlinx.coroutines.flow.Flow
 interface AuthRepository {
     val isLoggedIn: Flow<Boolean>
 
-    suspend fun login(email: String, password: String): NetworkResult<User>
+    suspend fun login(email: String, password: String): NetworkResult<LoginResult>
+
+    /** The second step of signing in: a code from the authenticator app, or a recovery code. */
+    suspend fun completeLogin(mfaToken: String, code: String): NetworkResult<User>
+
+    suspend fun mfaStatus(): NetworkResult<MfaStatus>
+
+    suspend fun startMfaSetup(): NetworkResult<MfaSetup>
+
+    /** Turns two-step verification on; returns the recovery codes, shown to the user only this once. */
+    suspend fun enableMfa(code: String): NetworkResult<List<String>>
+
+    suspend fun disableMfa(password: String, code: String): NetworkResult<Unit>
+
+    suspend fun newRecoveryCodes(code: String): NetworkResult<List<String>>
 
     suspend fun register(
         fullName: String,
@@ -82,6 +108,9 @@ interface TransactionRepository {
 
 interface TransferRepository {
     suspend fun send(request: TransferRequest): NetworkResult<TransferReceipt>
+
+    /** To the user's own M-Pesa number (on their profile); the server refuses any other. Whole shillings. */
+    suspend fun withdrawToMpesa(accountId: String, amount: BigDecimal, idempotencyKey: String): NetworkResult<MpesaWithdrawal>
 }
 
 interface PreferencesRepository {
@@ -150,7 +179,33 @@ interface BusinessRepository {
 
     suspend fun businesses(): NetworkResult<List<Business>>
 
+    /** Starts a business with the user as its owner; it has its own wallet. */
+    suspend fun createBusiness(name: String, registrationNumber: String): NetworkResult<Business>
+
+    // --- The team: owners, admins, finance and viewers ---
+
+    suspend fun members(businessId: String): NetworkResult<List<Member>>
+
+    /** Pending invitations; owners and admins only. */
+    suspend fun teamInvitations(businessId: String): NetworkResult<List<TeamInvitation>>
+
+    /** Emails a link to join with this role. A new invitation to the same address replaces the old one. */
+    suspend fun inviteMember(businessId: String, email: String, role: String): NetworkResult<TeamInvitation>
+
+    suspend fun revokeTeamInvitation(businessId: String, invitationId: String): NetworkResult<Unit>
+
+    suspend fun changeRole(businessId: String, memberId: String, role: String): NetworkResult<Member>
+
+    /** Removes someone from the team, or, with the user's own membership, leaves the business. */
+    suspend fun removeMember(businessId: String, memberId: String): NetworkResult<Unit>
+
+    /** Accepts an emailed team invitation (the token from its link); returns the business joined. */
+    suspend fun acceptTeamInvitation(token: String): NetworkResult<Business>
+
     suspend fun wallet(businessId: String): NetworkResult<BusinessWallet>
+
+    /** Owners only. */
+    suspend fun setApprovalLimit(businessId: String, amount: String): NetworkResult<Business>
 
     suspend fun workers(businessId: String, search: String? = null): NetworkResult<List<Worker>>
 
@@ -231,4 +286,57 @@ interface BusinessRepository {
     suspend fun categories(businessId: String): NetworkResult<List<BookCategory>>
 
     suspend fun reclassify(businessId: String, entryId: String, categoryId: Int): NetworkResult<Unit>
+
+    // --- Suppliers and payments out of the cashbook ---
+
+    suspend fun suppliers(businessId: String): NetworkResult<List<Supplier>>
+
+    /** kind: SUPPLIER, CONTRACTOR, LANDLORD, UTILITY, SERVICE_PROVIDER, OTHER. `details` keys follow the method. */
+    suspend fun addSupplier(
+        businessId: String,
+        name: String,
+        kind: String,
+        method: PayoutMethod,
+        details: Map<String, String>,
+    ): NetworkResult<Supplier>
+
+    suspend fun verifySupplier(businessId: String, supplierId: String): NetworkResult<Supplier>
+
+    suspend fun archiveSupplier(businessId: String, supplierId: String): NetworkResult<Supplier>
+
+    suspend fun businessPayments(businessId: String): NetworkResult<List<BusinessPayment>>
+
+    suspend fun paySupplier(
+        businessId: String,
+        supplierId: String,
+        amount: String,
+        note: String,
+        idempotencyKey: String,
+    ): NetworkResult<BusinessPayment>
+
+    /** approve, reject or cancel. */
+    suspend fun businessPaymentAction(businessId: String, paymentId: String, action: String, note: String = ""): NetworkResult<BusinessPayment>
+
+    // --- Bills (payables) and invoices (receivables) ---
+
+    suspend fun invoices(businessId: String, openOnly: Boolean): NetworkResult<Invoices>
+
+    /** isBill: money the business owes a supplier (expense category); otherwise owed to it (income category). */
+    suspend fun createInvoice(
+        businessId: String,
+        isBill: Boolean,
+        party: String,
+        amount: String,
+        categoryId: Int,
+        description: String,
+        dueDate: String?,
+    ): NetworkResult<Invoice>
+
+    /** Cashbook entries that could pay this bill or collect this invoice. */
+    suspend fun payableEntries(businessId: String, invoiceId: String): NetworkResult<List<BookEntry>>
+
+    /** Links a cashbook entry (a real payment) to the bill or invoice it pays. */
+    suspend fun payInvoice(businessId: String, invoiceId: String, entryId: String): NetworkResult<Invoice>
+
+    suspend fun cancelInvoice(businessId: String, invoiceId: String, reason: String): NetworkResult<Invoice>
 }

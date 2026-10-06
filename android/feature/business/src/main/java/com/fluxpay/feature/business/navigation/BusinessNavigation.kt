@@ -11,8 +11,12 @@ import com.fluxpay.feature.business.presentation.BusinessHomeScreen
 import com.fluxpay.feature.business.presentation.BusinessHubScreen
 import com.fluxpay.feature.business.presentation.EmployersScreen
 import com.fluxpay.feature.business.presentation.JoinBusinessScreen
+import com.fluxpay.feature.business.presentation.JoinTeamScreen
+import com.fluxpay.feature.business.presentation.NewBusinessScreen
 import com.fluxpay.feature.business.presentation.PayRunDetailScreen
 import com.fluxpay.feature.business.presentation.PayRunsScreen
+import com.fluxpay.feature.business.presentation.SuppliersScreen
+import com.fluxpay.feature.business.presentation.TeamScreen
 import com.fluxpay.feature.business.presentation.WorkersScreen
 
 object BusinessRoutes {
@@ -27,6 +31,14 @@ object BusinessRoutes {
     const val PAY_RUNS = "business/{$BUSINESS_ID}/pay-runs"
     const val PAY_RUN = "business/{$BUSINESS_ID}/pay-runs/{$RUN_ID}"
     const val BOOKS = "business/{$BUSINESS_ID}/books"
+    const val TEAM = "business/{$BUSINESS_ID}/team"
+    const val SUPPLIERS = "business/{$BUSINESS_ID}/suppliers"
+
+    // Anyone, from Settings (the Business tab only shows once they're in a business).
+    const val NEW = "new-business"
+    const val TOKEN = "token"
+    const val JOIN_TEAM = "join-business?$TOKEN={$TOKEN}"
+    const val JOIN_TEAM_START = "join-business"
 
     // As a worker (reachable from Home and Settings; workers don't have the Business tab).
     const val EMPLOYERS = "employers"
@@ -44,7 +56,10 @@ private val businessArg = navArgument(BusinessRoutes.BUSINESS_ID) { type = NavTy
  */
 fun NavGraphBuilder.businessScreens(navController: NavController) {
     composable(BusinessRoutes.HUB) {
-        BusinessHubScreen(onOpenBusiness = { id -> navController.navigate("business/$id") })
+        BusinessHubScreen(
+            onOpenBusiness = { id -> navController.navigate("business/$id") },
+            onNewBusiness = { navController.navigate(BusinessRoutes.NEW) },
+        )
     }
     composable(BusinessRoutes.HOME, arguments = listOf(businessArg)) {
         BusinessHomeScreen(
@@ -52,6 +67,9 @@ fun NavGraphBuilder.businessScreens(navController: NavController) {
             onWorkers = { id, tab -> navController.navigate("business/$id/workers" + (tab?.let { "?tab=$it" } ?: "")) },
             onPayRuns = { id -> navController.navigate("business/$id/pay-runs") },
             onBooks = { id -> navController.navigate("business/$id/books") },
+            onTeam = { id -> navController.navigate("business/$id/team") },
+            onSuppliers = { id -> navController.navigate("business/$id/suppliers") },
+            onSecurity = { navController.navigate("settings/security") },
         )
     }
     composable(BusinessRoutes.WORKERS, arguments = listOf(businessArg, optional(BusinessRoutes.TAB))) {
@@ -71,6 +89,30 @@ fun NavGraphBuilder.businessScreens(navController: NavController) {
     }
     composable(BusinessRoutes.BOOKS, arguments = listOf(businessArg)) {
         BooksScreen(onBack = navController::popBackStack)
+    }
+    composable(BusinessRoutes.SUPPLIERS, arguments = listOf(businessArg)) {
+        SuppliersScreen(onBack = navController::popBackStack)
+    }
+    composable(BusinessRoutes.TEAM, arguments = listOf(businessArg)) {
+        TeamScreen(
+            onBack = navController::popBackStack,
+            // They left: the business is gone for them, so back past its pages.
+            onLeft = { navController.popBackStack(BusinessRoutes.HOME, inclusive = true) },
+        )
+    }
+    composable(BusinessRoutes.NEW) {
+        NewBusinessScreen(onBack = navController::popBackStack, onCreated = { id -> navController.openBusiness(id, BusinessRoutes.NEW) })
+    }
+    composable(
+        BusinessRoutes.JOIN_TEAM,
+        arguments = listOf(optional(BusinessRoutes.TOKEN)),
+        // From the team invitation email.
+        deepLinks = listOf(navDeepLink { uriPattern = "fluxpay://join-business?token={${BusinessRoutes.TOKEN}}" }),
+    ) {
+        JoinTeamScreen(
+            onBack = navController::popBackStack,
+            onJoined = { id -> navController.openBusiness(id, BusinessRoutes.JOIN_TEAM) },
+        )
     }
     composable(BusinessRoutes.EMPLOYERS) {
         EmployersScreen(onBack = navController::popBackStack, onJoin = { navController.navigate(BusinessRoutes.JOIN_START) })
@@ -92,3 +134,7 @@ fun NavGraphBuilder.businessScreens(navController: NavController) {
         )
     }
 }
+
+/** Opens a business the user just started or joined, in place of the screen that got them there. */
+private fun NavController.openBusiness(id: String, from: String) =
+    navigate("business/$id") { popUpTo(from) { inclusive = true } }

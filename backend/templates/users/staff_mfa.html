@@ -1,0 +1,38 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<div class="flex flex-col gap-4" style="max-width: 560px">
+{% if recovery_codes %}
+    <h2 class="font-semibold text-lg">Two-step verification is on</h2>
+    <p>Keep these recovery codes somewhere safe (not on your phone). Each works once if you lose your authenticator app. They won't be shown again.</p>
+    <pre class="font-mono p-4 rounded-default border border-base-200 dark:border-base-700">{% for code in recovery_codes %}{{ code }}
+{% endfor %}</pre>
+    <a href="{{ next }}" class="font-medium inline-flex items-center rounded-default px-3 py-2 bg-primary-600 text-white" style="width: fit-content">Continue to the back office</a>
+{% else %}
+<form method="post" class="flex flex-col gap-4">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if setting_up %}
+        <p>The back office needs two-step verification. Add FluxPay to an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, ...):</p>
+        <ol class="list-decimal ml-6 flex flex-col gap-1">
+            <li>Choose <strong>Add account → Enter a setup key</strong> (time-based).</li>
+            <li>Account: <strong>{{ request.user.email }}</strong>. Key: <code class="font-mono font-semibold">{{ secret_groups }}</code></li>
+            <li>Or, on a phone, <a class="text-primary-600" href="{{ otpauth_uri }}">open this link</a> in the app.</li>
+        </ol>
+        <p>Then enter the 6-digit code the app shows.</p>
+    {% else %}
+        <p>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+    {% endif %}
+    <div class="flex flex-col gap-2">
+        <label for="id_code" class="font-semibold">Code</label>
+        <input id="id_code" name="code" autocomplete="one-time-code" inputmode="numeric" autofocus required
+               class="border border-base-200 dark:border-base-700 rounded-default px-3 py-2 font-mono" style="max-width: 240px">
+        {% if error %}<p class="text-red-600 text-sm">{{ error }}</p>{% endif %}
+    </div>
+    <div class="flex gap-2">
+        <button type="submit" class="font-medium inline-flex items-center gap-1 rounded-default px-3 py-2 bg-primary-600 text-white"><span class="material-symbols-outlined">verified_user</span> {% if setting_up %}Turn on{% else %}Verify{% endif %}</button>
+        <a href="/admin/logout/" class="font-medium inline-flex items-center rounded-default px-3 py-2 border border-base-200 dark:border-base-700">Sign out</a>
+    </div>
+</form>
+{% endif %}
+</div>
+{% endblock %}

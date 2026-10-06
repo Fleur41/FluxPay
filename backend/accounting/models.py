@@ -390,3 +390,74 @@ class BusinessEntry(models.Model):
     @property
     def signed_amount(self) -> Decimal:
         return self.amount if self.direction == self.Direction.IN else -self.amount
+
+
+class Invoice(models.Model):
+    """Money a business owes (a bill from a supplier: payable) or is owed (an invoice to a customer: receivable).
+
+    Recording it books the expense or income at once, against Accounts payable or receivable. No money moves:
+    it is paid when a cashbook entry (a real payment out, or money received) is linked to it, which moves that
+    entry from its category to payables/receivables. See accounting.invoices.
+    """
+
+    class Kind(models.TextChoices):
+        BILL = "BILL", "Bill to pay"
+        INVOICE = "INVOICE", "Invoice to collect"
+
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Not paid"
+        PART_PAID = "PART_PAID", "Part paid"
+        PAID = "PAID", "Paid"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT, related_name="invoices")
+    kind = models.CharField(max_length=8, choices=Kind.choices)
+    number = models.CharField(max_length=20)  # BILL-0001 / INV-0001, per business
+    party = models.CharField(max_length=150, help_text="The supplier (bill) or customer (invoice).")
+    description = models.CharField(max_length=255, blank=True)
+    category = models.ForeignKey(LedgerAccount, on_delete=models.PROTECT, related_name="invoices")
+    currency = models.CharField(max_length=3)
+    amount = models.DecimalField(**MONEY, validators=[MinValueValidator(Decimal("0.01"))])
+    paid_amount = models.DecimalField(**MONEY, default=ZERO)
+    issue_date = models.DateField()
+    due_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN)
+    journal = models.ForeignKey(JournalEntry, on_delete=models.PROTECT, related_name="+")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-issue_date", "-created_at")
+        constraints = [
+            models.UniqueConstraint(fields=("organization", "number"), name="invoice_number_unique_per_business"),
+            models.CheckConstraint(condition=Q(paid_amount__lte=models.F("amount")), name="invoice_not_overpaid"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} {self.party} {self.amount}"
+
+    @property
+    def outstanding(self) -> Decimal:
+        return ZERO if self.status == self.Status.CANCELLED else self.amount - self.paid_amount
+
+
+class InvoicePayment(models.Model):
+    """A cashbook entry that pays (part of) a bill, or collects (part of) an invoice. One entry, one invoice."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
+    entry = models.OneToOneField(BusinessEntry, on_delete=models.PROTECT, related_name="invoice_payment")
+    amount = models.DecimalField(**MONEY, validators=[MinValueValidator(Decimal("0.01"))])
+    # The entry's category before it was moved to payables/receivables.
+    previous_category = models.ForeignKey(LedgerAccount, on_delete=models.PROTECT, related_name="+")
+    journal = models.ForeignKey(JournalEntry, on_delete=models.PROTECT, related_name="+")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at",)

@@ -17,10 +17,15 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.AddBusiness
 import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.LocalShipping
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.RequestQuote
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.Card
@@ -63,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxpay.core.domain.model.BookEntry
+import com.fluxpay.core.domain.model.Invoice
 import com.fluxpay.core.domain.model.PayRun
 import com.fluxpay.core.domain.model.PayRunStatus
 import com.fluxpay.core.domain.model.Payslip
@@ -143,17 +149,25 @@ private fun runTone(status: PayRunStatus) = when (status) {
 @Composable
 fun BusinessHubScreen(
     onOpenBusiness: (String) -> Unit,
+    onNewBusiness: () -> Unit,
     viewModel: BusinessHubViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    Scaffold(topBar = { TopAppBar(title = { Text("Business") }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Business") }) },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(onClick = onNewBusiness, icon = { Icon(Icons.Outlined.AddBusiness, null) },
+                text = { Text("Start a business") })
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
         ScreenBody(state, snackbar, padding, viewModel::load, viewModel::messageShown) { hub ->
             item { SectionTitle("My businesses") }
             if (hub.businesses.isEmpty()) {
                 item {
                     EmptyState(Icons.Outlined.Storefront, "No businesses yet",
-                        "When a business adds you as owner, admin or finance, it appears here to pay workers and keep its books.")
+                        "Start one, or accept an invitation to help run one, to pay workers and keep its books here.")
                 }
             }
             items(hub.businesses, key = { it.id }) { business ->
@@ -207,39 +221,157 @@ fun BusinessHomeScreen(
     onWorkers: (String, String?) -> Unit,
     onPayRuns: (String) -> Unit,
     onBooks: (String) -> Unit,
+    onTeam: (String) -> Unit,
+    onSuppliers: (String) -> Unit,
+    onSecurity: () -> Unit,
     viewModel: BusinessHomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val id = viewModel.businessId
+    var changingLimit by remember { mutableStateOf(false) }
+    if (changingLimit) {
+        InputDialog("Approval limit",
+            "Pay runs and payments up to this amount go straight out. Above it, a second owner or admin must approve: " +
+                "that protects the business if one person makes a mistake or their phone is stolen. Use 0 to approve everything.",
+            listOf(Triple("Amount", KeyboardType.Decimal, state.data?.business?.approvalThreshold?.toPlainString() ?: "")),
+            "Save", onConfirm = { (amount) -> changingLimit = false; viewModel.setApprovalLimit(amount) },
+            onDismiss = { changingLimit = false })
+    }
+    LaunchedEffect(Unit) { viewModel.load() } // fresh figures after coming back from paying or approving
     Scaffold(
         topBar = { BackTopBar(state.data?.business?.name ?: "Business", state.data?.business?.roleLabel, onBack) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ScreenBody(state, snackbar, padding, viewModel::load, viewModel::messageShown) { home ->
-            item {
-                StatCard("Business wallet", money(home.wallet.balance, home.wallet.currency), Modifier.fillMaxWidth(),
-                    footer = "Account ${home.wallet.accountNumber}. Workers are paid from here.")
+            val currency = home.wallet.currency
+            if (home.needsTwoStep) {
+                item {
+                    ActionCard(Icons.Outlined.Lock, "Turn on two-step verification",
+                        "Owners and admins need it to pay, approve or change anything here. You can still look around.",
+                        onClick = onSecurity, badge = "Needed")
+                }
             }
             item {
-                val requests = home.joinRequests.takeIf { it > 0 }?.let { if (it == 1) "1 request to join" else "$it requests to join" }
-                ActionCard(Icons.Outlined.Badge, "Workers", "${home.workers} on the payroll. Invite workers, approve requests, change salaries.",
-                    onClick = { onWorkers(id, if (requests != null) "REQUESTS" else null) }, badge = requests)
+                StatCard("Business wallet", money(home.wallet.balance, currency), Modifier.fillMaxWidth(),
+                    footer = "Account ${home.wallet.accountNumber}. Customers and owners pay in here; workers and suppliers are paid from it.")
             }
             item {
-                val badge = home.waitingForApproval.takeIf { it > 0 }?.let { "$it to approve" }
-                ActionCard(Icons.Outlined.Payments, "Pay workers", "Pay everyone in one go, approve pay runs, take back a wrong payment.",
-                    onClick = { onPayRuns(id) }, badge = badge)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatCard("In this month", home.monthMoneyIn?.let { money(it, currency) } ?: "…", Modifier.weight(1f))
+                    StatCard("Out this month", home.monthMoneyOut?.let { money(it, currency) } ?: "…", Modifier.weight(1f))
+                }
+            }
+            home.month?.let { month ->
+                item {
+                    StatCard(if (month.profit.signum() >= 0) "Profit this month" else "Loss this month", money(month.profit, currency),
+                        Modifier.fillMaxWidth().clickable { onBooks(id) },
+                        footer = "Income ${money(month.income.total, currency)} · expenses ${money(month.expenses.total, currency)}. Tap for the books.")
+                }
+            }
+
+            // Everything waiting on someone, most urgent first.
+            val owed = home.owed?.totals
+            val attention = buildList {
+                if (home.waitingForApproval > 0) add(Triple("${home.waitingForApproval} pay run${if (home.waitingForApproval == 1) "" else "s"} to approve", Icons.Outlined.Payments) { onPayRuns(id) })
+                if (home.paymentsToApprove > 0) add(Triple("${home.paymentsToApprove} supplier payment${if (home.paymentsToApprove == 1) "" else "s"} to approve", Icons.Outlined.LocalShipping) { onSuppliers(id) })
+                if (home.joinRequests > 0) add(Triple("${home.joinRequests} worker${if (home.joinRequests == 1) "" else "s"} asking to join", Icons.Outlined.Badge) { onWorkers(id, "REQUESTS") })
+                if (home.suppliersToCheck > 0) add(Triple("${home.suppliersToCheck} supplier${if (home.suppliersToCheck == 1) "" else "s"} with payout details to check", Icons.Outlined.LocalShipping) { onSuppliers(id) })
+                if (owed != null && owed.payableOverdue.signum() > 0) add(Triple("${money(owed.payableOverdue, currency)} of bills overdue", Icons.Outlined.RequestQuote) { onBooks(id) })
+                if (owed != null && owed.receivableOverdue.signum() > 0) add(Triple("${money(owed.receivableOverdue, currency)} overdue from customers", Icons.Outlined.RequestQuote) { onBooks(id) })
+            }
+            if (attention.isNotEmpty()) {
+                item { SectionTitle("Needs your attention", Modifier.padding(top = 8.dp)) }
+                items(attention) { (text, icon, open) -> ActionCard(icon, text, "Tap to open", onClick = open, badge = "To do") }
+            }
+
+            item { SectionTitle("At a glance", Modifier.padding(top = 8.dp)) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatCard("Workers", "${home.workers}", Modifier.weight(1f).clickable { onWorkers(id, null) },
+                        footer = "${money(home.monthlyPayroll, currency)} a month")
+                    StatCard("Latest pay run", home.payRuns.firstOrNull()?.statusLabel ?: "None yet",
+                        Modifier.weight(1f).clickable { onPayRuns(id) },
+                        footer = home.payRuns.firstOrNull()?.let { "${it.title}: ${money(it.total, currency)}" } ?: "Pay everyone in one go")
+                }
+            }
+            if (owed != null) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatCard("We owe", money(owed.payable, currency), Modifier.weight(1f).clickable { onBooks(id) }, footer = "Unpaid bills")
+                        StatCard("Owed to us", money(owed.receivable, currency), Modifier.weight(1f).clickable { onBooks(id) }, footer = "Unpaid invoices")
+                    }
+                }
             }
             item {
-                ActionCard(Icons.Outlined.MenuBook, "Books", "Cashbook, money in and out, profit and balance sheet.",
-                    onClick = { onBooks(id) })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Approval limit: ${money(home.business.approvalThreshold, currency)}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Pay runs and payments above this need a second owner or admin to approve.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (home.business.isOwner) TextButton(onClick = { changingLimit = true }) { Text("Change") }
+                }
             }
-            home.payRuns.firstOrNull()?.let { latest ->
-                item { SectionTitle("Latest pay run", Modifier.padding(top = 8.dp)) }
-                item { PayRunCard(latest) { onPayRuns(id) } }
+
+            item { SectionTitle("Manage", Modifier.padding(top = 8.dp)) }
+            item { ActionCard(Icons.Outlined.Payments, "Pay workers", "Pay everyone in one go, approve pay runs, take back a wrong payment.", onClick = { onPayRuns(id) }) }
+            item { ActionCard(Icons.Outlined.LocalShipping, "Pay suppliers", "Suppliers, contractors and the landlord: by M-Pesa, paybill, till, bank or FluxPay.", onClick = { onSuppliers(id) }) }
+            item { ActionCard(Icons.Outlined.Badge, "Workers", "Invite workers, approve requests, change salaries.", onClick = { onWorkers(id, null) }) }
+            item { ActionCard(Icons.Outlined.MenuBook, "Books", "Cashbook, bills and invoices, profit and balance sheet.", onClick = { onBooks(id) }) }
+            item {
+                ActionCard(Icons.Outlined.Groups, "Team",
+                    if (home.business.manageableRoles.isEmpty()) "Who helps run the business, and their roles."
+                    else "Invite an admin, finance or viewer to help run the business, and change roles.",
+                    onClick = { onTeam(id) })
+            }
+
+            if (home.recent.isNotEmpty()) {
+                item { SectionTitle("Latest in the cashbook", Modifier.padding(top = 8.dp), action = { TextButton(onClick = { onBooks(id) }) { Text("All") } }) }
+                items(home.recent, key = { "recent-${it.id}" }) { entry ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(entry.counterparty.ifBlank { entry.sourceLabel }, maxLines = 1)
+                            Text("${entry.date} · ${entry.category.name}", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text((if (entry.isMoneyIn) "+" else "−") + money(entry.amount, currency),
+                            color = if (entry.isMoneyIn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold)
+                    }
+                    HorizontalDivider()
+                }
             }
         }
+    }
+}
+
+/**
+ * What happens when this draft is sent, in plain words, and whether sending is blocked: not enough money,
+ * or above the approval limit with nobody else allowed to approve (nobody approves their own pay run).
+ */
+internal fun sendingNote(run: PayRun, businessName: String): Pair<String, Boolean> {
+    val limit = money(run.approvalThreshold, run.currency)
+    return when {
+        run.shortfall.signum() > 0 -> "The business wallet holds ${money(run.walletBalance, run.currency)}; this pay run needs " +
+            "${money(run.total, run.currency)}. Add ${money(run.shortfall, run.currency)} to the wallet before sending." to true
+        run.needsApproval && run.otherApprovers.isEmpty() -> "This is above the approval limit of $limit, so another owner or " +
+            "admin must approve it, and nobody can approve a pay run they prepared. Nobody else in $businessName can approve. " +
+            "To pay: have a finance member prepare it so an owner can approve it, add an admin, or raise the approval limit " +
+            "on the business page (owners)." to true
+        run.needsApproval -> "Above the approval limit of $limit: after you send it, it waits for " +
+            "${run.otherApprovers.joinToString(" or ")} to approve. Nobody is paid until then." to false
+        else -> "Within the approval limit of $limit: everyone is paid as soon as you send it." to false
+    }
+}
+
+@Composable
+private fun NoteCard(text: String, warning: Boolean) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+        containerColor = if (warning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+    )) {
+        Text(text, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall,
+            color = if (warning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 
@@ -347,12 +479,20 @@ fun PayRunDetailScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     when (run.status) {
                         PayRunStatus.DRAFT -> if (business.canPrepare) {
-                            FluxPrimaryButton("Send pay run (${money(run.total, run.currency)})", { dialog = "submit" }, loading = state.busy)
+                            val (note, blocked) = sendingNote(run, business.name)
+                            NoteCard(note, warning = blocked)
+                            FluxPrimaryButton("Send pay run (${money(run.total, run.currency)})", { dialog = "submit" },
+                                loading = state.busy, enabled = !blocked)
                             OutlinedButton(onClick = { dialog = "cancel" }, Modifier.fillMaxWidth()) { Text("Cancel draft") }
                             Text("Tap a worker to change their pay or leave them out of this run.",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         PayRunStatus.PENDING_APPROVAL -> {
+                            if (run.otherApprovers.isEmpty()) {
+                                NoteCard("Nobody else in ${business.name} can approve this: approval needs an owner or admin " +
+                                    "other than ${run.createdByName}, who prepared it. Cancel it and have a finance member prepare it " +
+                                    "instead, add an admin, or raise the approval limit.", warning = true)
+                            }
                             if (business.canApprove) {
                                 FluxPrimaryButton("Approve and pay everyone", { dialog = "approve" }, loading = state.busy)
                                 OutlinedButton(onClick = { dialog = "reject" }, Modifier.fillMaxWidth()) { Text("Reject") }
@@ -397,7 +537,7 @@ fun PayRunDetailScreen(
         }
     }
     when (dialog) {
-        "submit" -> InputDialog("Send pay run?", data?.let { "${it.run.workerCount} workers will receive ${money(it.run.total, it.run.currency)} in total. Above your approval limit, an owner or admin must approve first." },
+        "submit" -> InputDialog("Send pay run?", data?.let { "${it.run.workerCount} workers will receive ${money(it.run.total, it.run.currency)} in total. ${sendingNote(it.run, it.business.name).first}" },
             emptyList(), "Send", onConfirm = { dialog = null; viewModel.submit() }, onDismiss = { dialog = null })
         "approve" -> InputDialog("Approve and pay?", "Money leaves the business wallet now and lands in every worker's wallet.",
             listOf(Triple("Note (optional)", KeyboardType.Text, "")), "Approve",
@@ -434,6 +574,10 @@ fun BooksScreen(
     val snackbar = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
     var refiling by remember { mutableStateOf<BookEntry?>(null) }
+    var newInvoice by remember { mutableStateOf<Boolean?>(null) } // true: a bill, false: an invoice
+    var opened by remember { mutableStateOf<Invoice?>(null) }
+    var linking by remember { mutableStateOf<Invoice?>(null) }
+    var cancelling by remember { mutableStateOf<Invoice?>(null) }
     Scaffold(
         topBar = { BackTopBar("Books", state.data?.business?.name, onBack) },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -460,7 +604,8 @@ fun BooksScreen(
             item {
                 TabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Cashbook") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Profit & balance sheet") })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Bills & invoices") })
+                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Reports") })
                 }
             }
             if (tab == 0) {
@@ -498,6 +643,9 @@ fun BooksScreen(
                     }
                     HorizontalDivider()
                 }
+            } else if (tab == 1) {
+                billsAndInvoices(books, books.business.canPrepare, onNew = { newInvoice = it }, onOpen = { opened = it },
+                    onOpenOnly = viewModel::showOpenOnly)
             } else {
                 val s = books.summary
                 item { SummaryBlock("Income", s.income, currency) }
@@ -505,12 +653,40 @@ fun BooksScreen(
                 item { AmountRow(if (s.profit.signum() >= 0) "Profit" else "Loss", money(s.profit, currency), bold = true) }
                 item { SectionTitle("Balance sheet", Modifier.padding(top = 12.dp)) }
                 item { SummaryBlock("What the business has", s.assets, currency) }
+                if (s.liabilities.lines.isNotEmpty()) item { SummaryBlock("What the business owes", s.liabilities, currency) }
                 item { SummaryBlock("Owners' equity", s.equity, currency) }
                 item {
-                    StatusPill(if (s.balanced) "Balances: assets = equity" else "Does not balance", if (s.balanced) Tone.GOOD else Tone.BAD)
+                    StatusPill(if (s.balanced) "Balances: assets = liabilities + equity" else "Does not balance",
+                        if (s.balanced) Tone.GOOD else Tone.BAD)
                 }
             }
         }
+    }
+    val currency = state.data?.invoices?.currency.orEmpty()
+    newInvoice?.let { isBill ->
+        NewInvoiceDialog(isBill, state.data?.categories.orEmpty(),
+            onSave = { party, amount, category, description, due ->
+                newInvoice = null
+                viewModel.record(isBill, party, amount, category, description, due)
+            },
+            onDismiss = { newInvoice = null })
+    }
+    opened?.let { invoice ->
+        InvoiceSheet(invoice, currency, state.data?.business?.canPrepare == true,
+            onLinkPayment = { opened = null; linking = invoice; viewModel.findPayments(invoice) },
+            onCancel = { opened = null; cancelling = invoice },
+            onDismiss = { opened = null })
+    }
+    linking?.let { invoice ->
+        LinkPaymentSheet(invoice, state.data?.payable, currency,
+            onPick = { entry -> linking = null; viewModel.pay(invoice, entry) },
+            onDismiss = { linking = null })
+    }
+    cancelling?.let { invoice ->
+        InputDialog("Cancel ${invoice.number}?", "Use this when it was recorded by mistake. It comes out of the books.",
+            listOf(Triple("Why? (required)", KeyboardType.Text, "")), "Cancel ${if (invoice.isBill) "bill" else "invoice"}",
+            onConfirm = { (reason) -> cancelling = null; viewModel.cancel(invoice, reason) },
+            onDismiss = { cancelling = null }, destructive = true)
     }
     refiling?.let { entry ->
         val categories = state.data?.categories.orEmpty().filter {

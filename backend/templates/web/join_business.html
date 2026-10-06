@@ -1,0 +1,9 @@
+{% extends "web/_base.html" %}
+{% block title %}Join a business team · FluxPay{% endblock %}
+{% block content %}
+  <h1>You're invited to help run a business on FluxPay</h1>
+  <p>Sign in to the FluxPay app with the email this invitation was sent to, then accept it.</p>
+  <a class="button" href="{{ app_link }}">Open in the FluxPay app</a>
+  <p class="small" style="margin-top:20px">If the button doesn't open the app: in FluxPay go to <strong>Settings → Join a business team</strong> and paste this page's link:</p>
+  <div class="code small" style="font-size:12px;letter-spacing:0;word-break:break-all">{{ page_link }}</div>
+{% endblock %}

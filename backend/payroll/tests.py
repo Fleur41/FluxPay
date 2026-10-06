@@ -159,6 +159,15 @@ class PayrollTests(PayrollTestCase):
         self.assertEqual(res.data["status"], "PAID")
         self.assertEqual(res.data["decided_by_name"], "Grace Kamau")
 
+    def test_pay_run_explains_approval_and_money_before_sending(self):
+        self.add_workers("20000")  # 100,000 needed, 50,000 held, limit 0
+        run = self.create_run()
+        self.assertEqual((run["approval_threshold"], run["wallet_balance"]), ("0.00", "50000.00"))
+        self.assertEqual(run["other_approvers"], [])  # the owner prepared it; finance can't approve
+        self.client.force_authenticate(self.finance)
+        run = self.create_run("Finance prepared")
+        self.assertEqual(run["other_approvers"], ["Grace Kamau"])
+
     def test_nobody_approves_their_own_pay_run(self):
         self.add_workers()
         run = self.create_run()

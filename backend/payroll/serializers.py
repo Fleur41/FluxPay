@@ -4,7 +4,7 @@ from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from accounting.models import BusinessEntry, LedgerAccount
+from accounting.models import BusinessEntry, Invoice, LedgerAccount
 from organizations.models import Payment
 
 from .models import PayRun, Worker
@@ -45,7 +45,7 @@ class WorkerSerializer(serializers.ModelSerializer):
 
 
 class WorkerCreateSerializer(serializers.Serializer):
-    """An invitation: by FluxPay account number, or by phone (with a name, and optionally an email)."""
+    """An invitation: by FluxPay account number, or by phone and/or email (with a name)."""
 
     full_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     account_number = serializers.CharField(max_length=10, required=False, allow_blank=True, default="")
@@ -56,8 +56,10 @@ class WorkerCreateSerializer(serializers.Serializer):
     job_title = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
 
     def validate(self, data):
-        if not data["account_number"] and not data["phone_number"]:
-            raise serializers.ValidationError("Give the worker's phone number or FluxPay account number.")
+        if not (data["account_number"] or data["phone_number"] or data["email"]):
+            raise serializers.ValidationError("Give the worker's email, phone number or FluxPay account number.")
+        if not data["account_number"] and not data["full_name"].strip():
+            raise serializers.ValidationError({"full_name": "Give the worker's full name."})
         return data
 
 
@@ -179,9 +181,29 @@ class PayRunSerializer(serializers.ModelSerializer):
 
 class PayRunDetailSerializer(PayRunSerializer):
     payslips = serializers.SerializerMethodField()
+    # So the app can explain before sending: will it need approval, from whom, and is there enough money?
+    approval_threshold = serializers.DecimalField(
+        source="organization.approval_threshold", max_digits=14, decimal_places=2, read_only=True
+    )
+    wallet_balance = serializers.SerializerMethodField()
+    other_approvers = serializers.SerializerMethodField()
 
     class Meta(PayRunSerializer.Meta):
-        fields = PayRunSerializer.Meta.fields + ("payslips",)
+        fields = PayRunSerializer.Meta.fields + ("payslips", "approval_threshold", "wallet_balance", "other_approvers")
+
+    def get_wallet_balance(self, run):
+        from banking.models import Account
+
+        return str(Account.objects.values_list("balance", flat=True).get(pk=run.source_account_id))
+
+    def get_other_approvers(self, run):
+        """Owners and admins other than the preparer: the people who could approve this run."""
+        from organizations.models import Membership
+
+        members = Membership.objects.filter(
+            organization_id=run.organization_id, is_active=True, role__in=[Membership.Role.OWNER, Membership.Role.ADMIN]
+        ).exclude(user_id=run.created_by_id)
+        return list(members.values_list("user__full_name", flat=True))
 
     def get_payslips(self, run):
         payslips = run.payslips.select_related("worker__wallet__owner", "transfer", "reversal")
@@ -262,3 +284,50 @@ class BookEntrySerializer(serializers.ModelSerializer):
 class ReclassifySerializer(serializers.Serializer):
     category_id = serializers.IntegerField()
     note = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    category = CategorySerializer(read_only=True)
+    outstanding = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    is_overdue = serializers.SerializerMethodField()
+    created_by = serializers.CharField(source="created_by.full_name", read_only=True)
+    payments = serializers.SerializerMethodField()
+
+    def get_is_overdue(self, invoice) -> bool:
+        from accounting.services import business_date
+
+        return bool(invoice.outstanding and invoice.due_date and invoice.due_date < business_date())
+
+    def get_payments(self, invoice) -> list:
+        return [
+            {"entry_id": str(p.entry_id), "date": p.entry.date, "amount": str(p.amount), "reference": p.entry.reference,
+             "counterparty": p.entry.counterparty}
+            for p in invoice.payments.select_related("entry")
+        ]  # fmt: skip
+
+    class Meta:
+        model = Invoice
+        fields = ("id", "kind", "kind_label", "number", "party", "description", "category", "currency", "amount",
+                  "paid_amount", "outstanding", "issue_date", "due_date", "is_overdue", "status", "status_label",
+                  "created_by", "created_at", "payments")  # fmt: skip
+        read_only_fields = fields
+
+
+class InvoiceCreateSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=Invoice.Kind.choices)
+    party = serializers.CharField(max_length=150)
+    description = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal("0.01"))
+    category_id = serializers.IntegerField()
+    issue_date = serializers.DateField(required=False, allow_null=True, default=None)
+    due_date = serializers.DateField(required=False, allow_null=True, default=None)
+
+
+class InvoicePaySerializer(serializers.Serializer):
+    entry_id = serializers.UUIDField()
+
+
+class InvoiceCancelSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=200)

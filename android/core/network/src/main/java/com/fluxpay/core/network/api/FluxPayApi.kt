@@ -1,41 +1,64 @@
 package com.fluxpay.core.network.api
 
 import com.fluxpay.core.network.dto.AccountDto
+import com.fluxpay.core.network.dto.AmountDto
 import com.fluxpay.core.network.dto.AuthResponseDto
+import com.fluxpay.core.network.dto.BeneficiaryDto
+import com.fluxpay.core.network.dto.BookEntryDto
+import com.fluxpay.core.network.dto.BooksSummaryDto
+import com.fluxpay.core.network.dto.BusinessPaymentCreateDto
+import com.fluxpay.core.network.dto.BusinessPaymentDto
+import com.fluxpay.core.network.dto.CashbookDto
+import com.fluxpay.core.network.dto.CategoryCreateDto
+import com.fluxpay.core.network.dto.CategoryDto
+import com.fluxpay.core.network.dto.CodeDto
 import com.fluxpay.core.network.dto.DetailResponseDto
+import com.fluxpay.core.network.dto.EmployerDto
+import com.fluxpay.core.network.dto.ExternalPaymentDto
+import com.fluxpay.core.network.dto.InvitationPreviewDto
+import com.fluxpay.core.network.dto.InvoiceCreateDto
+import com.fluxpay.core.network.dto.InvoiceDto
+import com.fluxpay.core.network.dto.InvoiceListDto
+import com.fluxpay.core.network.dto.InvoicePayDto
+import com.fluxpay.core.network.dto.JoinCodeDto
 import com.fluxpay.core.network.dto.LoginRequestDto
+import com.fluxpay.core.network.dto.LoginResponseDto
+import com.fluxpay.core.network.dto.MemberDto
+import com.fluxpay.core.network.dto.MfaCodeDto
+import com.fluxpay.core.network.dto.MfaDisableDto
+import com.fluxpay.core.network.dto.MfaLoginDto
+import com.fluxpay.core.network.dto.MfaSetupDto
+import com.fluxpay.core.network.dto.MfaStatusDto
+import com.fluxpay.core.network.dto.MpesaWithdrawalDto
+import com.fluxpay.core.network.dto.MyPayslipDto
+import com.fluxpay.core.network.dto.NoteDto
 import com.fluxpay.core.network.dto.NotificationSettingsDto
 import com.fluxpay.core.network.dto.NotificationSettingsPatchDto
+import com.fluxpay.core.network.dto.OrganizationCreateDto
+import com.fluxpay.core.network.dto.OrganizationDto
+import com.fluxpay.core.network.dto.OrganizationPatchDto
 import com.fluxpay.core.network.dto.PageDto
 import com.fluxpay.core.network.dto.PasswordResetConfirmDto
-import com.fluxpay.core.network.dto.PlatformConfigDto
 import com.fluxpay.core.network.dto.PasswordResetRequestDto
+import com.fluxpay.core.network.dto.PayRunCreateDto
+import com.fluxpay.core.network.dto.PayRunDto
+import com.fluxpay.core.network.dto.PayslipDto
+import com.fluxpay.core.network.dto.PlatformConfigDto
+import com.fluxpay.core.network.dto.ReasonDto
 import com.fluxpay.core.network.dto.RecipientDto
+import com.fluxpay.core.network.dto.ReclassifyDto
+import com.fluxpay.core.network.dto.RecoveryCodesDto
 import com.fluxpay.core.network.dto.RefreshRequestDto
 import com.fluxpay.core.network.dto.RefreshResponseDto
 import com.fluxpay.core.network.dto.RegisterRequestDto
+import com.fluxpay.core.network.dto.RoleDto
+import com.fluxpay.core.network.dto.TeamInvitationDto
+import com.fluxpay.core.network.dto.TeamInviteDto
+import com.fluxpay.core.network.dto.TokenDto
 import com.fluxpay.core.network.dto.TransactionDto
 import com.fluxpay.core.network.dto.TransferRequestDto
 import com.fluxpay.core.network.dto.TransferResponseDto
 import com.fluxpay.core.network.dto.UserDto
-import com.fluxpay.core.network.dto.AmountDto
-import com.fluxpay.core.network.dto.BooksSummaryDto
-import com.fluxpay.core.network.dto.CashbookDto
-import com.fluxpay.core.network.dto.CodeDto
-import com.fluxpay.core.network.dto.EmployerDto
-import com.fluxpay.core.network.dto.InvitationPreviewDto
-import com.fluxpay.core.network.dto.JoinCodeDto
-import com.fluxpay.core.network.dto.CategoryCreateDto
-import com.fluxpay.core.network.dto.CategoryDto
-import com.fluxpay.core.network.dto.BookEntryDto
-import com.fluxpay.core.network.dto.MyPayslipDto
-import com.fluxpay.core.network.dto.NoteDto
-import com.fluxpay.core.network.dto.OrganizationDto
-import com.fluxpay.core.network.dto.PayRunCreateDto
-import com.fluxpay.core.network.dto.PayRunDto
-import com.fluxpay.core.network.dto.PayslipDto
-import com.fluxpay.core.network.dto.ReasonDto
-import com.fluxpay.core.network.dto.ReclassifyDto
 import com.fluxpay.core.network.dto.WorkerActionDto
 import com.fluxpay.core.network.dto.WorkerCreateDto
 import com.fluxpay.core.network.dto.WorkerDto
@@ -68,7 +91,26 @@ interface FluxPayApi {
 
     @Headers(NO_AUTH)
     @POST("api/v1/auth/login/")
-    suspend fun login(@Body body: LoginRequestDto): AuthResponseDto
+    suspend fun login(@Body body: LoginRequestDto): LoginResponseDto
+
+    /** The second step of signing in, with a code from the authenticator app or a recovery code. */
+    @POST("api/v1/auth/login/mfa/")
+    suspend fun loginMfa(@Body body: MfaLoginDto): AuthResponseDto
+
+    @GET("api/v1/auth/mfa/")
+    suspend fun mfaStatus(): MfaStatusDto
+
+    @POST("api/v1/auth/mfa/setup/")
+    suspend fun mfaSetup(): MfaSetupDto
+
+    @POST("api/v1/auth/mfa/enable/")
+    suspend fun mfaEnable(@Body body: MfaCodeDto): RecoveryCodesDto
+
+    @POST("api/v1/auth/mfa/disable/")
+    suspend fun mfaDisable(@Body body: MfaDisableDto): Response<Unit>
+
+    @POST("api/v1/auth/mfa/recovery-codes/")
+    suspend fun mfaRecoveryCodes(@Body body: MfaCodeDto): RecoveryCodesDto
 
     @Headers(NO_AUTH)
     @POST("api/v1/auth/register/")
@@ -108,6 +150,10 @@ interface FluxPayApi {
     @POST("api/v1/transfers/")
     suspend fun transfer(@Body body: TransferRequestDto): TransferResponseDto
 
+    /** The money leaves the wallet now; M-Pesa confirms later (or it comes back). Answers 202. */
+    @POST("api/v1/withdrawals/mpesa/")
+    suspend fun withdrawToMpesa(@Body body: MpesaWithdrawalDto): ExternalPaymentDto
+
     @GET("api/v1/notifications/settings/")
     suspend fun notificationSettings(): NotificationSettingsDto
 
@@ -127,6 +173,38 @@ interface FluxPayApi {
 
     @GET("api/v1/organizations/")
     suspend fun organizations(): List<OrganizationDto>
+
+    /** Owners only: e.g. the approval limit above which a second person must approve payments. */
+    @PATCH("api/v1/organizations/{org}/")
+    suspend fun updateOrganization(@Path("org") org: String, @Body body: OrganizationPatchDto): OrganizationDto
+
+    /** The caller becomes its owner; the business wallet opens with it. */
+    @POST("api/v1/organizations/")
+    suspend fun createOrganization(@Body body: OrganizationCreateDto): OrganizationDto
+
+    @GET("api/v1/organizations/{org}/members/")
+    suspend fun members(@Path("org") org: String): List<MemberDto>
+
+    @PATCH("api/v1/organizations/{org}/members/{id}/")
+    suspend fun changeRole(@Path("org") org: String, @Path("id") id: String, @Body body: RoleDto): MemberDto
+
+    /** Removes a member, or leaves the business when it's the caller's own membership. */
+    @DELETE("api/v1/organizations/{org}/members/{id}/")
+    suspend fun removeMember(@Path("org") org: String, @Path("id") id: String): Response<Unit>
+
+    /** Pending invitations (owners and admins). */
+    @GET("api/v1/organizations/{org}/invitations/")
+    suspend fun teamInvitations(@Path("org") org: String): List<TeamInvitationDto>
+
+    @POST("api/v1/organizations/{org}/invitations/")
+    suspend fun inviteMember(@Path("org") org: String, @Body body: TeamInviteDto): TeamInvitationDto
+
+    @DELETE("api/v1/organizations/{org}/invitations/{id}/")
+    suspend fun revokeTeamInvitation(@Path("org") org: String, @Path("id") id: String): Response<Unit>
+
+    /** The token from the emailed link (fluxpay://join-business?token=…); returns the business joined. */
+    @POST("api/v1/invitations/accept/")
+    suspend fun acceptTeamInvitation(@Body body: TokenDto): OrganizationDto
 
     @GET("api/v1/organizations/{org}/accounts/")
     suspend fun organizationAccounts(@Path("org") org: String): List<AccountDto>
@@ -228,6 +306,56 @@ interface FluxPayApi {
 
     @POST("api/v1/organizations/{org}/books/categories/")
     suspend fun addCategory(@Path("org") org: String, @Body body: CategoryCreateDto): CategoryDto
+
+    /** Saved suppliers, contractors, the landlord... (`active=all` would include archived ones). */
+    @GET("api/v1/organizations/{org}/beneficiaries/")
+    suspend fun beneficiaries(@Path("org") org: String, @Query("page") page: Int = 1): PageDto<BeneficiaryDto>
+
+    /** name, kind, method and that method's details (account_number, mpesa_phone, paybill_number...). */
+    @POST("api/v1/organizations/{org}/beneficiaries/")
+    suspend fun addBeneficiary(@Path("org") org: String, @Body body: Map<String, String>): BeneficiaryDto
+
+    /** An owner or admin (not the one who entered them) confirms the payout details. */
+    @POST("api/v1/organizations/{org}/beneficiaries/{id}/verify/")
+    suspend fun verifyBeneficiary(@Path("org") org: String, @Path("id") id: String): BeneficiaryDto
+
+    @DELETE("api/v1/organizations/{org}/beneficiaries/{id}/")
+    suspend fun archiveBeneficiary(@Path("org") org: String, @Path("id") id: String): BeneficiaryDto
+
+    /** Payments out of the cashbook made on their own (not pay-run salaries). */
+    @GET("api/v1/organizations/{org}/payments/")
+    suspend fun businessPayments(
+        @Path("org") org: String,
+        @Query("pay_run") payRun: String = "none",
+        @Query("page") page: Int = 1,
+    ): PageDto<BusinessPaymentDto>
+
+    /** Up to the approval limit it goes straight out; above it, it waits for an owner or admin. */
+    @POST("api/v1/organizations/{org}/payments/")
+    suspend fun createBusinessPayment(@Path("org") org: String, @Body body: BusinessPaymentCreateDto): BusinessPaymentDto
+
+    /** action: approve, reject or cancel. */
+    @POST("api/v1/organizations/{org}/payments/{id}/{action}/")
+    suspend fun businessPaymentAction(
+        @Path("org") org: String, @Path("id") id: String, @Path("action") action: String, @Body body: NoteDto,
+    ): BusinessPaymentDto
+
+    /** Bills and invoices, with what's owed each way. open = "1": only those not fully paid. */
+    @GET("api/v1/organizations/{org}/books/invoices/")
+    suspend fun invoices(@Path("org") org: String, @Query("open") open: String? = null): InvoiceListDto
+
+    @POST("api/v1/organizations/{org}/books/invoices/")
+    suspend fun createInvoice(@Path("org") org: String, @Body body: InvoiceCreateDto): InvoiceDto
+
+    /** Cashbook entries that could pay this bill (or collect this invoice). */
+    @GET("api/v1/organizations/{org}/books/invoices/{id}/payable-entries/")
+    suspend fun payableEntries(@Path("org") org: String, @Path("id") id: String): List<BookEntryDto>
+
+    @POST("api/v1/organizations/{org}/books/invoices/{id}/pay/")
+    suspend fun payInvoice(@Path("org") org: String, @Path("id") id: String, @Body body: InvoicePayDto): InvoiceDto
+
+    @POST("api/v1/organizations/{org}/books/invoices/{id}/cancel/")
+    suspend fun cancelInvoice(@Path("org") org: String, @Path("id") id: String, @Body body: ReasonDto): InvoiceDto
 
     @PATCH("api/v1/organizations/{org}/books/entries/{id}/")
     suspend fun reclassify(@Path("org") org: String, @Path("id") id: String, @Body body: ReclassifyDto): BookEntryDto
