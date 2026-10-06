@@ -156,6 +156,26 @@ def open_bank_account(**fields) -> BankAccount:
 # --- Dates and numbers ---------------------------------------------------------------------------
 
 
+def update_bank_account(*, staff, bank: BankAccount, **changes) -> BankAccount:
+    """Staff correct a bank account's details. Its account in the books is renamed with it; audited."""
+    allowed = {"name", "bank_name", "account_number", "branch", "is_active"}
+    with db_transaction.atomic():
+        bank = BankAccount.objects.select_for_update().select_related("ledger_account").get(pk=bank.pk)
+        before, after = {}, {}
+        for field, value in changes.items():
+            if field in allowed and getattr(bank, field) != value:
+                before[field], after[field] = str(getattr(bank, field)), str(value)
+                setattr(bank, field, value)
+        if not after:
+            return bank
+        bank.save(update_fields=list(after))
+        if "name" in after and bank.ledger_account.name != bank.name:
+            bank.ledger_account.name = bank.name[:120]
+            bank.ledger_account.save(update_fields=["name"])
+        record("bank_account.changed", actor=staff, target=bank, metadata={"before": before, "after": after})
+    return bank
+
+
 def business_date() -> Date:
     """Today in FluxPay's home time zone (a 1 a.m. deposit in Nairobi belongs to that day, not yesterday's UTC)."""
     return timezone.localdate(timezone.now(), ZoneInfo(settings.FLUXPAY_DISPLAY_TIMEZONE))
