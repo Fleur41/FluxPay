@@ -29,6 +29,7 @@ services:
     environment: &app-env
       DATABASE_URL: postgres://fluxpay:fluxpay@db:5432/fluxpay
       CELERY_BROKER_URL: redis://redis:6379/0
+      TZ: Africa/Nairobi  # the containers' clock (log timestamps); Django uses TIME_ZONE
     ports:
       - "8000:8000"
     depends_on: &app-deps

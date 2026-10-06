@@ -113,7 +113,9 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+# FluxPay runs on East Africa Time: the admin, logs, business dates and Celery all show Nairobi time.
+# The database still stores exact moments (USE_TZ), so changing this never changes saved data.
+TIME_ZONE = os.environ.get("TIME_ZONE", "Africa/Nairobi")
 USE_I18N = True
 USE_TZ = True
 
@@ -247,7 +249,7 @@ elif DEBUG and env_bool("FLUXPAY_FAKE_MPESA", True):
 if env_bool("FLUXPAY_BANK_PAYOUTS", DEBUG):
     FLUXPAY_PAYMENT_PROVIDERS["BANK"] = "payments.providers.bank.ManualBankProvider"
 # Transaction alerts (notifications app). Times in alerts and statements are shown in this zone.
-FLUXPAY_DISPLAY_TIMEZONE = os.environ.get("FLUXPAY_DISPLAY_TIMEZONE", "Africa/Nairobi")
+FLUXPAY_DISPLAY_TIMEZONE = os.environ.get("FLUXPAY_DISPLAY_TIMEZONE", TIME_ZONE)
 # SMS: Africa's Talking once an API key is set, otherwise printed to the log.
 AFRICASTALKING_USERNAME = os.environ.get("AFRICASTALKING_USERNAME", "sandbox")
 AFRICASTALKING_API_KEY = os.environ.get("AFRICASTALKING_API_KEY", "")
