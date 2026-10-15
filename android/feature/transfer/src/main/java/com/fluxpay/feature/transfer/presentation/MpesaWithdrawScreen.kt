@@ -46,6 +46,7 @@ import com.fluxpay.feature.transfer.presentation.viewmodel.MpesaWithdrawViewMode
 fun MpesaWithdrawScreen(onBack: () -> Unit, onDone: () -> Unit, viewModel: MpesaWithdrawViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scrollState = rememberScrollState()
     val confirmAndSend: () -> Unit = confirm@{
         if (!viewModel.validate()) return@confirm
         val wallet = state.wallet ?: return@confirm
@@ -72,7 +73,11 @@ fun MpesaWithdrawScreen(onBack: () -> Unit, onDone: () -> Unit, viewModel: Mpesa
         },
     ) { padding ->
         Column(
-            Modifier.padding(padding).fillMaxSize().imePadding().verticalScroll(rememberScrollState())
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -80,8 +85,8 @@ fun MpesaWithdrawScreen(onBack: () -> Unit, onDone: () -> Unit, viewModel: Mpesa
             val sent = state.sent
             when {
                 sent != null -> {
-                    Icon(Icons.Outlined.CheckCircle, null, Modifier.fillMaxWidth(), tint = MaterialTheme.colorScheme.primary)
-                    Text(MoneyFormatter.format(sent.amount, sent.currency), Modifier.fillMaxWidth(),
+                    Icon(Icons.Outlined.CheckCircle, null, modifier = Modifier.fillMaxWidth(), tint = MaterialTheme.colorScheme.primary)
+                    Text(MoneyFormatter.format(sent.amount, sent.currency), modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.displaySmall, textAlign = TextAlign.Center)
                     Text("On its way to ${state.phoneNumber}. M-Pesa usually confirms within a minute; you'll get their SMS. " +
                         "If M-Pesa can't pay it, the money comes back to your wallet.",

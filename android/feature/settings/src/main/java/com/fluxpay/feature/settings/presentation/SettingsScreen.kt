@@ -95,7 +95,7 @@ fun SettingsScreen(
             }
 
             SettingsSection("Money") {
-                SettingsRow(Icons.Outlined.Payments, "Preferred currency", "Used for your dashboard total")
+                SettingsRow(icon = Icons.Outlined.Payments, "Preferred currency", "Used for your dashboard total")
                 FlowRow(
                     Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -123,7 +123,7 @@ fun SettingsScreen(
                     title = "Two-step verification",
                     subtitle = "A code from an authenticator app when you sign in. Needed to manage a business",
                     onClick = onOpenSecurity,
-                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                ) { Icon(imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
             }
 
             SettingsSection("Work") {
@@ -132,22 +132,22 @@ fun SettingsScreen(
                     title = "My employers",
                     subtitle = "Businesses that pay you. Join one with a code or QR code",
                     onClick = onOpenEmployers,
-                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                ) { Icon(imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
                 SettingsRow(
                     icon = Icons.Outlined.AddBusiness,
                     title = "Start a business",
                     subtitle = "Its own wallet to pay workers and suppliers, and its own books",
                     onClick = onStartBusiness,
-                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                ) { Icon(imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
                 SettingsRow(
                     icon = Icons.Outlined.Groups,
                     title = "Join a business team",
                     subtitle = "Invited to help run a business? Accept with the link from the email",
                     onClick = onJoinTeam,
-                ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
+                ) { Icon(imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) }
             }
 
-            SettingsSection("Transaction alerts") {
+            SettingsSection(title = "Transaction alerts") {
                 SettingsRow(
                     icon = Icons.Outlined.Email,
                     title = "Email alerts",
@@ -173,7 +173,7 @@ fun SettingsScreen(
                 }
                 state.alerts.error?.let { error ->
                     Row(
-                        Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+                        modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -189,7 +189,7 @@ fun SettingsScreen(
 
             SettingsSection("Appearance") {
                 SettingsRow(Icons.Outlined.DarkMode, "Theme")
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(start = 56.dp, end = 16.dp, bottom = 12.dp)) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 16.dp, bottom = 12.dp)) {
                     val modes = ThemeMode.entries
                     modes.forEachIndexed { index, mode ->
                         SegmentedButton(
@@ -220,7 +220,7 @@ fun SettingsScreen(
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
-            icon = { androidx.compose.material3.Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null) },
+            icon = { Icon(imageVector = Icons.AutoMirrored.Outlined.Logout, contentDescription = null) },
             title = { Text("Sign out?") },
             text = { Text("Your cached balances and history will be removed from this phone.") },
             confirmButton = {
@@ -229,7 +229,11 @@ fun SettingsScreen(
                     viewModel.logout()
                 }) { Text("Sign out") }
             },
-            dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = { confirmLogout = false }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 }

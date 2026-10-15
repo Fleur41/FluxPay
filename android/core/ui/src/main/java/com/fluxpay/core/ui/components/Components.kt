@@ -87,7 +87,12 @@ fun FluxSecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = 
             .fillMaxWidth()
             .height(54.dp),
         shape = MaterialTheme.shapes.medium,
-    ) { Text(text, style = MaterialTheme.typography.labelLarge) }
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge
+        )
+    }
 }
 
 @Composable
@@ -205,11 +210,12 @@ fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        val backgroundColor = MaterialTheme.colorScheme.primaryContainer
         Box(
             modifier = Modifier
                 .size(64.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .background(backgroundColor),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -226,7 +232,11 @@ fun EmptyState(
 
 @Composable
 fun FullScreenLoading(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+    Box(
+        modifier.fillMaxSize(), contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator()
+    }
 }
 
 
@@ -249,13 +259,20 @@ fun Avatar(name: String, modifier: Modifier = Modifier, size: Int = 44, containe
 }
 
 @Composable
-fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+fun SectionTitle(
+    text: String,
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null
+) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(text, style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium
+        )
         action?.invoke()
     }
 }

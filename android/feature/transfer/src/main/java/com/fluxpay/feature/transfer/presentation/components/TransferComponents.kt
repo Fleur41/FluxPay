@@ -77,7 +77,7 @@ fun SourceAccountPicker(
 
 @Composable
 fun SummaryRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
@@ -85,11 +85,11 @@ fun SummaryRow(label: String, value: String) {
 
 @Composable
 fun RecipientCard(name: String, accountNumber: String, rows: List<Pair<String, String>>) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(name)
-                Spacer(Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(name, style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -99,7 +99,7 @@ fun RecipientCard(name: String, accountNumber: String, rows: List<Pair<String, S
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             rows.forEach { (label, value) -> SummaryRow(label, value) }
         }
     }
