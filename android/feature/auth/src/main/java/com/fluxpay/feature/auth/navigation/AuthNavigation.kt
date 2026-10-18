@@ -31,7 +31,8 @@ object AuthRoutes {
 }
 
 fun NavGraphBuilder.authGraph(navController: NavController) {
-    navigation(startDestination = AuthRoutes.LOGIN, route = AuthRoutes.GRAPH) {
+    val startDestination = AuthRoutes.LOGIN
+    navigation(startDestination = startDestination, route = AuthRoutes.GRAPH) {
         composable(AuthRoutes.LOGIN) {
             LoginScreen(
                 onRegisterClick = { navController.navigate(AuthRoutes.REGISTER) },

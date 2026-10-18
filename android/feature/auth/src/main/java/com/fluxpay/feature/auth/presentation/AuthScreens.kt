@@ -55,7 +55,10 @@ fun LoginScreen(
             )
             FluxPrimaryButton(text = "Verify", onClick = viewModel::submitCode, loading = state.isLoading,
                 enabled = state.code.isNotBlank())
-            TextButton(onClick = viewModel::cancelCode, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            TextButton(
+                onClick = viewModel::cancelCode,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
                 Text("Use a different account")
             }
         }

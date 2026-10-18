@@ -139,6 +139,7 @@ class SecurityViewModel @Inject constructor(private val auth: AuthRepository) : 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SecurityScreen(onBack: () -> Unit, viewModel: SecurityViewModel = hiltViewModel()) {
+    val scrollState = rememberScrollState()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -158,11 +159,15 @@ fun SecurityScreen(onBack: () -> Unit, viewModel: SecurityViewModel = hiltViewMo
     ) { padding ->
         val status = state.status
         if (status == null && state.error == null) {
-            FullScreenLoading(Modifier.padding(padding))
+            FullScreenLoading(modifier = Modifier.padding(padding))
             return@Scaffold
         }
         Column(
-            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             state.error?.let { ErrorBanner(it) }
@@ -173,8 +178,8 @@ fun SecurityScreen(onBack: () -> Unit, viewModel: SecurityViewModel = hiltViewMo
                     Text("Save your recovery codes", style = MaterialTheme.typography.titleLarge)
                     Text("If you lose your phone, each of these codes signs you in once. Keep them somewhere safe, " +
                         "not on this phone. They won't be shown again.", style = MaterialTheme.typography.bodyMedium)
-                    Card(Modifier.fillMaxWidth()) {
-                        Text(codes.joinToString("\n"), Modifier.padding(16.dp), fontFamily = FontFamily.Monospace,
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Text(codes.joinToString("\n"), modifier = Modifier.padding(16.dp), fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodyLarge)
                     }
                     FluxSecondaryButton("Copy codes", { copy(context, "FluxPay recovery codes", codes.joinToString("\n")) })
@@ -191,9 +196,9 @@ fun SecurityScreen(onBack: () -> Unit, viewModel: SecurityViewModel = hiltViewMo
                             viewModel.noAuthenticatorApp()
                         }
                     })
-                    Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(16.dp)) {
-                            Text(setup.secret.chunked(4).joinToString(" "), Modifier.weight(1f), fontFamily = FontFamily.Monospace,
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(16.dp)) {
+                            Text(setup.secret.chunked(4).joinToString(" "), modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.SemiBold)
                             TextButton(onClick = { copy(context, "FluxPay key", setup.secret) }) { Text("Copy") }
                         }

@@ -12,5 +12,9 @@ object BudgetRoutes {
 fun NavController.navigateToBudget() = navigate(BudgetRoutes.BUDGET) { launchSingleTop = true }
 
 fun NavGraphBuilder.budgetScreen(onBack: () -> Unit) {
-    composable(BudgetRoutes.BUDGET) { BudgetScreen(onBack = onBack) }
+    composable(
+        BudgetRoutes.BUDGET
+    ) {
+        BudgetScreen(onBack = onBack)
+    }
 }

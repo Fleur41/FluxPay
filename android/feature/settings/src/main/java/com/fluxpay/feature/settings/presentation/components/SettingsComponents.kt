@@ -18,15 +18,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun SettingsSection(title: String, content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
+fun SettingsSection(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             title,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(vertical = 4.dp)) { content() } }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) { content() }
+        }
     }
 }
 
@@ -39,14 +44,14 @@ fun SettingsRow(
     trailing: @Composable (() -> Unit)? = null,
 ) {
     Row(
-        Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             if (subtitle != null) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -75,7 +75,10 @@ private fun paymentTone(payment: BusinessPayment) = when (payment.status) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SuppliersScreen(onBack: () -> Unit, viewModel: SuppliersViewModel = hiltViewModel()) {
+fun SuppliersScreen(
+    onBack: () -> Unit,
+    viewModel: SuppliersViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
@@ -114,11 +117,14 @@ fun SuppliersScreen(onBack: () -> Unit, viewModel: SuppliersViewModel = hiltView
                 }
                 items(d.suppliers, key = { it.id }) { supplier ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { selected = supplier }.padding(vertical = 6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selected = supplier }
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Avatar(supplier.name, size = 36)
-                        Column(Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(supplier.name)
                             Text("${supplier.kindLabel} · ${supplier.methodLabel} · ${supplier.details}", maxLines = 1,
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -132,9 +138,9 @@ fun SuppliersScreen(onBack: () -> Unit, viewModel: SuppliersViewModel = hiltView
                     item { EmptyState(Icons.Outlined.Payments, "No payments yet", "Payments to suppliers show here.") }
                 }
                 items(d.payments, key = { it.id }) { payment ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(payment.recipient.ifBlank { payment.typeLabel })
                                 Text(listOfNotNull(payment.date, payment.payoutMethod, payment.note.ifBlank { null },
                                     "by ${payment.createdBy}").joinToString(" · "),
@@ -169,7 +175,7 @@ fun SuppliersScreen(onBack: () -> Unit, viewModel: SuppliersViewModel = hiltView
     }
     selected?.let { supplier ->
         ModalBottomSheet(onDismissRequest = { selected = null }) {
-            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(supplier.name, style = MaterialTheme.typography.titleMedium)
                 Text("${supplier.kindLabel} · ${supplier.methodLabel}", style = MaterialTheme.typography.bodySmall)
                 Text(supplier.details, style = MaterialTheme.typography.bodyMedium)
@@ -216,6 +222,7 @@ private fun AddSupplierDialog(
     onSave: (name: String, kind: String, method: PayoutMethod, details: Map<String, String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     var name by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf("SUPPLIER") }
     var method by remember { mutableStateOf(PayoutMethod.MPESA_MOBILE) }
@@ -225,7 +232,11 @@ private fun AddSupplierDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add supplier") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 FluxTextField(value = name, onValueChange = { name = it }, label = "Name")
                 Text("What they are", style = MaterialTheme.typography.labelLarge)
                 ChipRow(supplierKinds, kind) { kind = it }

@@ -216,7 +216,7 @@ private fun ReviewStep(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     FluxPrimaryButton(text = "Confirm & send", onClick = onConfirm, loading = sending)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
         Icon(Icons.Outlined.Fingerprint, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             " You'll confirm with your fingerprint, face or screen lock",
@@ -231,12 +231,12 @@ private fun ReviewStep(
 private fun SuccessStep(step: TransferStep.Success, onDone: () -> Unit, onViewTransaction: () -> Unit) {
     val receipt = step.receipt
     Column(
-        Modifier.fillMaxWidth().padding(top = 24.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
-            Modifier.size(84.dp).clip(CircleShape).background(FluxTheme.colors.heroGradient),
+            modifier = Modifier.size(84.dp).clip(CircleShape).background(FluxTheme.colors.heroGradient),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Outlined.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(44.dp))
@@ -253,7 +253,7 @@ private fun SuccessStep(step: TransferStep.Success, onDone: () -> Unit, onViewTr
             textAlign = TextAlign.Center,
         )
         Text("Reference ${receipt.reference}", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         FluxPrimaryButton(text = "Done", onClick = onDone)
         FluxSecondaryButton(text = "View receipt", onClick = onViewTransaction)
     }

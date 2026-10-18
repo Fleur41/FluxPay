@@ -101,10 +101,12 @@ internal fun LazyListScope.billsAndInvoices(
     }
     items(books.invoices.items, key = { it.id }) { invoice ->
         Row(
-            Modifier.fillMaxWidth().clickable { onOpen(invoice) }.padding(vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth()
+                .clickable { onOpen(invoice) }
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(invoice.party, maxLines = 1)
                 Text(
                     listOfNotNull(
@@ -132,6 +134,7 @@ internal fun NewInvoiceDialog(
     onSave: (party: String, amount: String, category: BookCategory, description: String, dueDate: String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     val options = categories.filter { it.type == if (isBill) "EXPENSE" else "INCOME" }
     var party by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
@@ -144,7 +147,10 @@ internal fun NewInvoiceDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isBill) "Bill to pay" else "Invoice to collect") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
                     if (isBill) "Money the business owes a supplier. It's counted as an expense now and shows as owed " +
                         "until you link the payment from the cashbook."
@@ -192,9 +198,9 @@ internal fun InvoiceSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${invoice.number} · ${invoice.party}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Text("${invoice.number} · ${invoice.party}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 StatusPill(if (invoice.isOverdue) "Overdue" else invoice.statusLabel, invoiceTone(invoice))
             }
             Text(
@@ -233,26 +239,29 @@ internal fun LinkPaymentSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
             Text(if (invoice.isBill) "Which payment paid ${invoice.number}?" else "Which money in paid ${invoice.number}?",
                 style = MaterialTheme.typography.titleMedium)
             Text("Up to ${money(invoice.outstanding, currency)}, not already linked to another bill or invoice.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {
-                entries == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                entries == null -> Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 entries.isEmpty() -> Text(
                     if (invoice.isBill) "No matching payment yet. Pay ${invoice.party} from the business first, then link it here."
                     else "No matching money in yet. Once ${invoice.party} pays, link it here.",
-                    Modifier.padding(vertical = 16.dp),
+                    modifier = Modifier.padding(vertical = 16.dp),
                 )
                 else -> Card(Modifier.fillMaxWidth().padding(top = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                     entries.forEach { entry ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(entry) }
+                                .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(entry.counterparty.ifBlank { entry.sourceLabel }, maxLines = 1)
                                 Text("${entry.date} · ${entry.category.name}", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)

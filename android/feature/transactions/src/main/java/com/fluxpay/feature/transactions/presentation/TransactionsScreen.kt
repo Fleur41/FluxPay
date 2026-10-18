@@ -62,7 +62,7 @@ fun TransactionsScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = viewModel::onQueryChange,

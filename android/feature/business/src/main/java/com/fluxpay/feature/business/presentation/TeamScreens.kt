@@ -58,6 +58,7 @@ import com.fluxpay.feature.business.presentation.viewmodel.TeamViewModel
 /** Anyone can start a business: they become its owner, and it gets its own wallet. */
 @Composable
 fun NewBusinessScreen(onBack: () -> Unit, onCreated: (String) -> Unit, viewModel: NewBusinessViewModel = hiltViewModel()) {
+    val scrollState = rememberScrollState()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var name by remember { mutableStateOf("") }
@@ -66,9 +67,11 @@ fun NewBusinessScreen(onBack: () -> Unit, onCreated: (String) -> Unit, viewModel
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); viewModel.messageShown() }
     }
-    Scaffold(topBar = { BackTopBar("Start a business", null, onBack) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(topBar = { BackTopBar("Start a business", null, onBack) }, snackbarHost = { SnackbarHost(snackbar) }) { innerPadding ->
         Column(
-            Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .padding(innerPadding)
+                .padding(16.dp).verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("You'll be its owner. It gets its own wallet, separate from yours, to pay workers and suppliers, " +
@@ -165,30 +168,30 @@ fun TeamScreen(onBack: () -> Unit, onLeft: () -> Unit, viewModel: TeamViewModel 
     selected?.let { member ->
         val me = team?.isMe(member) == true
         ModalBottomSheet(onDismissRequest = { selected = null }) {
-            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
                 Text(member.fullName.ifBlank { member.email }, style = MaterialTheme.typography.titleMedium)
                 Text("${member.roleLabel} · ${member.email}", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (me) {
-                    Text("You can't change your own role: ask another owner.", Modifier.padding(top = 12.dp),
+                    Text("You can't change your own role: ask another owner.", modifier = Modifier.padding(top = 12.dp),
                         style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { selected = null; removing = member }, Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { selected = null; removing = member }, modifier = Modifier.fillMaxWidth()) {
                         Text("Leave ${team?.business?.name}", Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error)
                     }
                 } else {
-                    Text("Change role", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleSmall)
+                    Text("Change role",  modifier = Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleSmall)
                     team?.business?.manageableRoles.orEmpty().forEach { role ->
-                        TextButton(onClick = { selected = null; viewModel.changeRole(member, role) }, Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { selected = null; viewModel.changeRole(member, role) }, modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Text(role.label + if (role.name == member.role) "  ✓" else "")
                                 Text(role.description, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    TextButton(onClick = { selected = null; removing = member }, Modifier.fillMaxWidth()) {
-                        Text("Remove from the team", Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    TextButton(onClick = { selected = null; removing = member }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Remove from the team", modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -214,23 +217,27 @@ fun TeamScreen(onBack: () -> Unit, onLeft: () -> Unit, viewModel: TeamViewModel 
 
 @Composable
 private fun InviteMemberDialog(roles: List<TeamRole>, onInvite: (String, TeamRole) -> Unit, onDismiss: () -> Unit) {
+    val scrollState = rememberScrollState()
     var email by remember { mutableStateOf("") }
     var role by remember { mutableStateOf(roles.firstOrNull { it == TeamRole.FINANCE } ?: roles.first()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Invite to the team") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text("They get an email with a link. They join once they open it in the FluxPay app, signed in with that email.",
                     style = MaterialTheme.typography.bodyMedium)
                 FluxTextField(value = email, onValueChange = { email = it }, label = "Email", keyboardType = KeyboardType.Email)
                 roles.forEach { option ->
                     Row(
-                        Modifier.fillMaxWidth().selectable(option == role, role = Role.RadioButton) { role = option },
+                        modifier = Modifier.fillMaxWidth().selectable(option == role, role = Role.RadioButton) { role = option },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = option == role, onClick = null)
-                        Column(Modifier.padding(start = 8.dp)) {
+                        Column(modifier = Modifier.padding(start = 8.dp)) {
                             Text(option.label)
                             Text(option.description, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -250,7 +257,12 @@ private fun InviteMemberDialog(roles: List<TeamRole>, onInvite: (String, TeamRol
 
 /** Opened from the invitation email's link, or with that link pasted in. */
 @Composable
-fun JoinTeamScreen(onBack: () -> Unit, onJoined: (String) -> Unit, viewModel: JoinTeamViewModel = hiltViewModel()) {
+fun JoinTeamScreen(
+    onBack: () -> Unit,
+    onJoined: (String) -> Unit,
+    viewModel: JoinTeamViewModel = hiltViewModel()
+) {
+    val scrollState = rememberScrollState()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.data?.joined) { state.data?.joined?.let { onJoined(it.id) } }
@@ -259,7 +271,10 @@ fun JoinTeamScreen(onBack: () -> Unit, onJoined: (String) -> Unit, viewModel: Jo
     }
     Scaffold(topBar = { BackTopBar("Join a business team", null, onBack) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(
-            Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("A business invited you to help run it on FluxPay. Accept to see it under the Business tab. " +

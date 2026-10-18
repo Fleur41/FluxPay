@@ -69,8 +69,13 @@ fun AuthScaffold(
 
 @Composable
 fun FluxLogo(modifier: Modifier = Modifier) {
+    val shape = MaterialTheme.shapes.medium
+    val brushColors = FluxTheme.colors.heroGradient
     Box(
-        modifier = modifier.size(56.dp).clip(MaterialTheme.shapes.medium).background(FluxTheme.colors.heroGradient),
+        modifier = modifier
+            .size(56.dp)
+            .clip(shape)
+            .background(brushColors),
         contentAlignment = Alignment.Center,
     ) {
         Text("F", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)

@@ -254,10 +254,10 @@ private fun WorkerRow(
     onDecline: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Avatar(worker.name, size = 40)
-            Column(Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(worker.name, style = MaterialTheme.typography.bodyLarge)
                 val detail = when (worker.status) {
                     WorkerStatus.INVITED -> listOf("Invited", worker.phoneNumber)
@@ -318,7 +318,7 @@ private fun JoinCodeDialog(code: JoinCode?, onNewCode: () -> Unit, onTurnOff: ()
                 val text = code?.code
                 val link = code?.link
                 if (code?.enabled == true && text != null && link != null) {
-                    QrImage(link, Modifier.size(220.dp))
+                    QrImage(link, modifier = Modifier.size(220.dp))
                     Text(text, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold)
                     Text("Workers open FluxPay, choose Join a business, and scan this or type the code. You approve each " +
@@ -388,11 +388,11 @@ fun EmployersScreen(onBack: () -> Unit, onJoin: () -> Unit, viewModel: Employers
                 }
             }
             items(employers, key = { it.id }) { employer ->
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Avatar(employer.business, size = 40)
-                            Column(Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(employer.business, style = MaterialTheme.typography.titleMedium)
                                 if (employer.jobTitle.isNotBlank()) {
                                     Text(employer.jobTitle, style = MaterialTheme.typography.bodySmall,
@@ -432,7 +432,11 @@ fun EmployersScreen(onBack: () -> Unit, onJoin: () -> Unit, viewModel: Employers
  * An invitation shows who it's from before accepting; a join code sends a request the business approves.
  */
 @Composable
-fun JoinBusinessScreen(onBack: () -> Unit, onDone: () -> Unit, viewModel: JoinBusinessViewModel = hiltViewModel()) {
+fun JoinBusinessScreen(
+    onBack: () -> Unit,
+    onDone: () -> Unit,
+    viewModel: JoinBusinessViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -458,8 +462,8 @@ fun JoinBusinessScreen(onBack: () -> Unit, onDone: () -> Unit, viewModel: JoinBu
                 }
                 invitation != null -> item {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("${invitation.business} invited you", style = MaterialTheme.typography.titleMedium)
                                 Text(listOf("as ${invitation.name}", invitation.jobTitle).filter { it.isNotBlank() }.joinToString(" · "),
                                     style = MaterialTheme.typography.bodyMedium)

@@ -619,12 +619,12 @@ fun BooksScreen(
                     item { EmptyState(Icons.Outlined.AccountBalanceWallet, "No money moved", "Nothing in or out in this period.") }
                 }
                 items(books.cashbook.entries, key = { it.id }) { entry ->
-                    Row(Modifier
+                    Row(modifier = Modifier
                         .fillMaxWidth()
                         .clickable(enabled = books.business.canPrepare) { refiling = entry }
                         .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(entry.counterparty.ifBlank { entry.sourceLabel }, maxLines = 1)
                             Text("${entry.date} · ${entry.category.name}", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -644,8 +644,12 @@ fun BooksScreen(
                     HorizontalDivider()
                 }
             } else if (tab == 1) {
-                billsAndInvoices(books, books.business.canPrepare, onNew = { newInvoice = it }, onOpen = { opened = it },
-                    onOpenOnly = viewModel::showOpenOnly)
+                billsAndInvoices(
+                    books, books.business.canPrepare,
+                    onNew = { newInvoice = it },
+                    onOpen = { opened = it },
+                    onOpenOnly = viewModel::showOpenOnly
+                )
             } else {
                 val s = books.summary
                 item { SummaryBlock("Income", s.income, currency) }
